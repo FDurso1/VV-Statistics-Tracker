@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Players</h1>
+  <form method="get" action="/players">
+    <input type="search" name="q" value="{{ query }}" placeholder="Search a player name...">
+    <button type="submit">Search</button>
+  </form>
+
+  {% if query %}
+    {% if not players %}
+      <p>No players matched "{{ query }}".</p>
+    {% endif %}
+    <table>
+      <thead><tr><th>Player</th></tr></thead>
+      <tbody>
+        {% for player in players %}
+          <tr><td><a href="/players/{{ player['id'] }}">{{ player['name'] }}</a></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p><em>Ranked by a confidence-adjusted win rate. Private players show a rank and name only.</em></p>
+    <p>
+      {% if hide_private %}
+        <a href="/players">Show all players</a>
+      {% else %}
+        <a href="/players?hide_private=1">Hide private players</a>
+      {% endif %}
+    </p>
+
+    <table>
+      <thead><tr><th>Rank</th><th>Player</th><th>Record</th><th>Score</th></tr></thead>
+      <tbody>
+        {% for entry in leaderboard %}
+          {% if not (hide_private and not entry['is_public']) %}
+          <tr>
+            <td>{{ entry['rank'] }}</td>
+            <td><a href="/players/{{ entry['id'] }}">{{ entry['name'] }}</a></td>
+            {% if entry['is_public'] %}
+              <td>{{ entry['wins'] }}W - {{ entry['losses'] }}L - {{ entry['draws'] }}D</td>
+              <td>{{ "%.3f"|format(entry['score']) }}</td>
+            {% else %}
+              <td colspan="2"><em>not publicly aggregated</em></td>
+            {% endif %}
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

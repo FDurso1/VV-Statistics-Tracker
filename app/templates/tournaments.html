@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Tournaments</h1>
+
+  <form method="get" action="/tournaments">
+    <div class="grid">
+      <input type="search" name="q" value="{{ query }}" placeholder="Search a tournament name...">
+      <select name="format">
+        <option value="" {% if not format %}selected{% endif %}>Any format</option>
+        {% for f in ["MTGO", "Cockatrice", "Webcam", "Paper"] %}
+          <option value="{{ f }}" {% if format == f %}selected{% endif %}>{{ f }}</option>
+        {% endfor %}
+      </select>
+      <input type="date" name="date_from" value="{{ date_from }}">
+      <input type="date" name="date_to" value="{{ date_to }}">
+    </div>
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if not tournaments %}
+    <p>No tournaments matched.</p>
+  {% endif %}
+
+  <table>
+    <thead><tr><th>Name</th><th>Date</th><th>Format</th></tr></thead>
+    <tbody>
+      {% for t in tournaments %}
+        <tr>
+          <td><a href="/tournaments/{{ t['id'] }}">{{ t['name'] }}</a></td>
+          <td>{{ t['played_on'] }}</td>
+          <td>{{ t['format'] }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

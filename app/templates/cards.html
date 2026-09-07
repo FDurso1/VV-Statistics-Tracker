@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Cards</h1>
+  <form method="get" action="/cards">
+    <input type="search" name="q" value="{{ query }}" placeholder="Search a card...">
+    <button type="submit">Search</button>
+  </form>
+
+  <p><a href="/cards/random">Random card</a></p>
+
+  {% if query and not cards %}
+    <p>No cards matched "{{ query }}".</p>
+  {% endif %}
+
+  {% if cards %}
+    <table>
+      <thead><tr><th>Card</th></tr></thead>
+      <tbody>
+        {% for card in cards %}
+          <tr><td><a href="/cards/{{ card['name'] | urlencode }}">{{ card['name'] }}</a></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% elif not query %}
+    <article>
+      <h2>Hottest cards (last 3 tournaments)</h2>
+      {% if top_cards %}
+        <table>
+          <thead><tr><th>Card</th><th>Decks</th></tr></thead>
+          <tbody>
+            {% for card in top_cards %}
+              <tr>
+                <td><a href="/cards/{{ card['name'] | urlencode }}">{{ card['name'] }}</a></td>
+                <td>{{ card['deck_count'] }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No tournament data yet.</p>
+      {% endif %}
+    </article>
+  {% endif %}
+{% endblock %}

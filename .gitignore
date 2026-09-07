@@ -1,0 +1,8 @@
+data/mtg_data.xlsx
+data/mtg_data.db
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env

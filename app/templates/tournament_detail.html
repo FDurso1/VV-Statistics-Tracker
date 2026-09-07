@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>{{ tournament['name'] }}</h1>
+  <p>{{ tournament['played_on'] }} &middot; {{ tournament['format'] }}
+     {% if tournament['venue'] %} &middot; {{ tournament['venue'] }}{% endif %}</p>
+
+  <article>
+    <h2>Final standings</h2>
+    <p><em>Ties decided based on tournament results.</em></p>
+    {% if standings %}
+      <table>
+        <thead><tr><th>Rank</th><th>Player</th><th>Archetype</th><th>Score</th></tr></thead>
+        <tbody>
+          {% for row in standings %}
+          <tr>
+            <td>{{ row['final_rank'] }}</td>
+            <td><a href="/players/{{ row['player_id'] }}">{{ row['player_name'] }}</a></td>
+            <td><a href="/archetypes/{{ row['archetype_id'] }}">{{ row['archetype'] }}</a></td>
+            <td>{{ row['wins'] }}W - {{ row['losses'] }}L - {{ row['draws'] }}D</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No final standings recorded for this tournament yet.</p>
+    {% endif %}
+  </article>
+
+  {% if rounds_by_number %}
+    <article>
+      <h2>Round-by-round results</h2>
+      {% for round_number, matches in rounds_by_number.items() | sort %}
+        <h3>Round {{ round_number }}</h3>
+        <table>
+          <thead><tr><th>Player 1</th><th>Archetype</th><th>Player 2</th><th>Archetype</th><th>Result</th></tr></thead>
+          <tbody>
+            {% for m in matches %}
+            <tr>
+              <td>{{ m['player_1'] }}</td>
+              <td>{{ m['archetype_1'] }}</td>
+              <td>{{ m['player_2'] or "BYE" }}</td>
+              <td>{{ m['archetype_2'] or "" }}</td>
+              <td>{{ m['result'] }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endfor %}
+    </article>
+  {% endif %}
+{% endblock %}

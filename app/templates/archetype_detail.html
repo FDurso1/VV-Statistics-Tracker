@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>{{ archetype['name'] }}</h1>
+
+  {% if request.args.get('via') == 'random' %}
+    <p><a href="/archetypes/random">Another random archetype</a></p>
+  {% endif %}
+
+  {% if pinned_undefeated %}
+    <p><strong>Most recent undefeated run:</strong>
+       <a href="/players/{{ pinned_undefeated['player_id'] }}">{{ pinned_undefeated['player_name'] }}</a>
+       at <a href="/tournaments/{{ pinned_undefeated['tournament_id'] }}">this tournament</a>
+       {% if pinned_undefeated['moxfield_url'] %}(<a href="{{ pinned_undefeated['moxfield_url'] }}" target="_blank">list</a>)
+       {% else %}(no list available){% endif %}</p>
+  {% endif %}
+
+  <article>
+    <h2>Details</h2>
+    <p>
+      {% if archetype['primary_colors'] %}<strong>Colors:</strong> {{ archetype['primary_colors'] }}<br>{% endif %}
+      {% if archetype['variant_of'] %}<strong>Variant of:</strong> {{ archetype['variant_of'] }}<br>{% endif %}
+      <strong>Style:</strong> {{ archetype['style'] }}
+    </p>
+  </article>
+
+  <article>
+    <h2>Playrate</h2>
+    <p>{{ playrate.deck_count }} of {{ playrate.total_decks }} recorded decks
+       ({{ "%.1f"|format(playrate.share * 100) }}%)</p>
+  </article>
+
+  <article>
+    <h2>Overall winrate</h2>
+    <p>{{ winrate.wins }}W &ndash; {{ winrate.losses }}L &ndash; {{ winrate.draws }}D</p>
+  </article>
+
+  <article>
+    <h2>Matchups</h2>
+    <p><em>Game-level record from round-by-round results. Mirror matches are excluded.</em></p>
+    {% if matchups %}
+      <p>
+        Sort:
+        <button onclick="sortMatchups('best')"><strong>Best</strong></button>
+        <button onclick="sortMatchups('worst')">Worst</button>
+      </p>
+      <table id="matchups-table">
+        <thead><tr><th>Opponent archetype</th><th>Record</th></tr></thead>
+        <tbody>
+          {% for m in matchups %}
+          {% set total = m['wins'] + m['losses'] + m.get('draws', 0) %}
+          <tr data-winrate="{{ (m['wins'] / total) if total > 0 else 0.5 }}">
+            <td><a href="/archetypes/{{ m['opponent_id'] }}">{{ m['opponent_name'] }}</a></td>
+            <td>{{ m['wins'] }}W &ndash; {{ m['losses'] }}L{% if m['draws'] %} &ndash; {{ m['draws'] }}D{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <script>
+        function sortMatchups(mode) {
+          const tbody = document.querySelector('#matchups-table tbody');
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          rows.sort((a, b) => {
+            const diff = parseFloat(b.dataset.winrate) - parseFloat(a.dataset.winrate);
+            return mode === 'worst' ? -diff : diff;
+          });
+          rows.forEach(r => tbody.appendChild(r));
+        }
+        sortMatchups('best');
+      </script>
+    {% else %}
+      <p>No matchup data recorded yet.</p>
+    {% endif %}
+  </article>
+
+  <article>
+    <h2>Top players</h2>
+    <p><em>Private players are not shown here, even if they've piloted this archetype.</em></p>
+    {% if top_players %}
+      <table>
+        <thead><tr><th>Player</th><th>Record with this archetype</th><th>Score</th></tr></thead>
+        <tbody>
+          {% for p in top_players %}
+          <tr>
+            <td><a href="/players/{{ p['id'] }}">{{ p['name'] }}</a></td>
+            <td>{{ p['wins'] }}W &ndash; {{ p['losses'] }}L &ndash; {{ p['draws'] }}D</td>
+            <td>{{ "%.3f"|format(p['score']) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No players recorded with this archetype yet.</p>
+    {% endif %}
+  </article>
+
+  <article>
+    <h2>Recent results</h2>
+    {% if recent_results %}
+      <p>
+        Sort:
+        <button onclick="sortResults('date')"><strong>Date</strong></button>
+        <button onclick="sortResults('player')">Player</button>
+        <button onclick="sortResults('record')">Record</button>
+      </p>
+      <table id="recent-results-table">
+        <thead><tr><th>Tournament</th><th>Date</th><th>Player</th><th>Rank</th><th>Record</th></tr></thead>
+        <tbody>
+          {% for r in recent_results %}
+          <tr data-date="{{ r['played_on'] }}" data-player="{{ r['player_name'] }}" data-wins="{{ r['wins'] }}" data-losses="{{ r['losses'] }}">
+            <td><a href="/tournaments/{{ r['tournament_id'] }}">{{ r['tournament_name'] }}</a></td>
+            <td>{{ r['played_on'] }}</td>
+            <td><a href="/players/{{ r['player_id'] }}">{{ r['player_name'] }}</a></td>
+            <td>{{ r['final_rank'] }}</td>
+            <td>{{ r['wins'] }}W &ndash; {{ r['losses'] }}L &ndash; {{ r['draws'] }}D
+                {% if r['moxfield_url'] %}(<a href="{{ r['moxfield_url'] }}" target="_blank">list</a>)
+                {% else %}(no list available){% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <script>
+        function sortResults(mode) {
+          const tbody = document.querySelector('#recent-results-table tbody');
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          rows.sort((a, b) => {
+            if (mode === 'player') return a.dataset.player.localeCompare(b.dataset.player);
+            if (mode === 'record') {
+              const diff = parseInt(b.dataset.wins) - parseInt(a.dataset.wins);
+              return diff !== 0 ? diff : parseInt(a.dataset.losses) - parseInt(b.dataset.losses);
+            }
+            return b.dataset.date.localeCompare(a.dataset.date); // date desc default
+          });
+          rows.forEach(r => tbody.appendChild(r));
+        }
+      </script>
+      <nav>
+        <ul>
+          {% if page > 1 %}
+            <li><a href="/archetypes/{{ archetype['id'] }}?page={{ page - 1 }}">&laquo; Newer</a></li>
+          {% endif %}
+          {% if has_more_results %}
+            <li><a href="/archetypes/{{ archetype['id'] }}?page={{ page + 1 }}">Older &raquo;</a></li>
+          {% endif %}
+        </ul>
+      </nav>
+    {% else %}
+      <p>No results recorded yet.</p>
+    {% endif %}
+  </article>
+
+  <article>
+    <h2>Card frequency</h2>
+    <nav>
+      <ul>
+        <li>
+          {% if not recent_only %}<strong>All time</strong>{% else %}<a href="/archetypes/{{ archetype['id'] }}">All time</a>{% endif %}
+          &nbsp;|&nbsp;
+          {% if recent_only %}<strong>Last 90 days</strong>{% else %}<a href="/archetypes/{{ archetype['id'] }}?recent=1">Last 90 days</a>{% endif %}
+        </li>
+      </ul>
+    </nav>
+    {% if card_stats %}
+      <table>
+        <thead><tr><th>Card</th><th>Decks</th><th>Avg. MB</th><th>Avg. SB</th></tr></thead>
+        <tbody>
+          {% for c in card_stats %}
+          <tr>
+            <td><a href="/cards/{{ c['name'] | urlencode }}">{{ c['name'] }}</a></td>
+            <td>{{ c['deck_count'] }}</td>
+            <td>{{ "%.1f"|format(c['avg_mainboard']) }}</td>
+            <td>{{ "%.1f"|format(c['avg_sideboard']) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No card data for this window.</p>
+    {% endif %}
+  </article>
+{% endblock %}

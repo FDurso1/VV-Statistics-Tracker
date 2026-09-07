@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>{{ card_name }}</h1>
+
+  {% if request.args.get('via') == 'random' %}
+    <p><a href="/cards/random">Another random card</a></p>
+  {% endif %}
+
+  {% if scryfall_id %}
+    <img src="https://api.scryfall.com/cards/{{ scryfall_id }}?format=image&version=normal"
+         alt="{{ card_name }}"
+         style="max-width: 250px; border-radius: 12px; margin-bottom: 1rem;"
+         loading="lazy">
+  {% else %}
+    <img src="https://api.scryfall.com/cards/named?exact={{ card_name | urlencode }}&format=image&version=normal"
+         alt="{{ card_name }}"
+         style="max-width: 250px; border-radius: 12px; margin-bottom: 1rem;"
+         loading="lazy"
+         onerror="this.style.display='none'">
+  {% endif %}
+
+  <article>
+    <h2>Tournament stats</h2>
+    {% set total = winrate.wins + winrate.losses %}
+    {% if total > 0 %}
+      <p>{{ winrate.wins }}W &ndash; {{ winrate.losses }}L &ndash; {{ winrate.draws }}D
+         ({{ "%.1f"|format(winrate.wins / total * 100) }}%)
+         across decks that ran this card</p>
+      <p><em>Bayesian score: {{ "%.3f"|format(winrate.score) }}</em></p>
+    {% else %}
+      <p><em>This card hasn't appeared in any recorded tournament deck yet.</em></p>
+    {% endif %}
+  </article>
+
+  <article>
+    <h2>Popularity</h2>
+    {% if popularity %}
+      <table>
+        <thead><tr><th>Archetype</th><th>Decks</th><th>Avg. MB</th><th>Avg. SB</th></tr></thead>
+        <tbody>
+          {% for row in popularity %}
+          <tr>
+            <td><a href="/archetypes/{{ row['id'] }}">{{ row['name'] }}</a></td>
+            <td>{{ row['deck_count'] }}</td>
+            <td>{{ "%.1f"|format(row['avg_mainboard']) }}</td>
+            <td>{{ "%.1f"|format(row['avg_sideboard']) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p><em>Not seen in any recorded tournament deck yet.</em></p>
+    {% endif %}
+  </article>
+
+  <article>
+    <h2>Price history</h2>
+    {% if price_history %}
+      <canvas id="price-chart" style="max-height: 350px;"></canvas>
+      <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+      <script>
+        const priceData = {{ price_history_json | safe }};
+        const labels = priceData.map(p => p.date);
+        const prices = priceData.map(p => p.price);
+
+        const ctx = document.getElementById('price-chart');
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: '{{ card_name }}',
+              data: prices,
+              borderWidth: 2,
+              pointRadius: 2,
+              tension: 0.2,
+              fill: false,
+            }]
+          },
+          options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+              y: {
+                beginAtZero: false,
+                ticks: { callback: v => '$' + v.toFixed(2) }
+              }
+            },
+            plugins: {
+              tooltip: {
+                callbacks: {
+                  label: ctx => '$' + ctx.parsed.y.toFixed(2)
+                }
+              }
+            }
+          }
+        });
+      </script>
+    {% else %}
+      <p><em>No price history yet. There probably isn't a valid price for this card on TCG / Scryfall.</em></p>
+    {% endif %}
+  </article>
+{% endblock %}

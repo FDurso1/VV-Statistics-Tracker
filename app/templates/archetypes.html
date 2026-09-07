@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Archetypes</h1>
+
+  <form method="get" action="/archetypes">
+    <input type="search" name="q" value="{{ query }}" placeholder="Search an archetype...">
+    <button type="submit">Search</button>
+  </form>
+
+  <form method="get" action="/archetypes">
+    <label>Colors: <input type="text" name="colors" value="{{ colors }}" placeholder="e.g. RW" maxlength="5"></label>
+    <select name="color_mode">
+      <option value="at_least" {% if color_mode == "at_least" %}selected{% endif %}>At least</option>
+      <option value="at_most" {% if color_mode == "at_most" %}selected{% endif %}>At most</option>
+      <option value="exactly" {% if color_mode == "exactly" %}selected{% endif %}>Exactly</option>
+    </select>
+    <label>Style:
+      <select name="style">
+        <option value="">Any</option>
+        {% for s in ["Combo", "Aggro", "Midrange", "Control", "Prison"] %}
+          <option value="{{ s }}" {% if style == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Filter</button>
+  </form>
+
+  <p><a href="/archetypes/random">Random archetype</a></p>
+
+  {% if query and not archetypes %}
+    <p>No archetypes matched "{{ query }}".</p>
+  {% endif %}
+
+  <table>
+    <thead><tr><th>Archetype</th><th>Colors</th><th>Style</th></tr></thead>
+    <tbody>
+      {% for archetype in archetypes %}
+        <tr>
+          <td><a href="/archetypes/{{ archetype['id'] }}">{{ archetype['name'] }}</a></td>
+          <td>{{ archetype['primary_colors'] or '' }}</td>
+          <td>{{ archetype['style'] or '' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if undefeated is not none %}
+  <div class="grid">
+    <article>
+      <h2>Recently undefeated</h2>
+      {% if undefeated %}
+        <ul>
+          {% for p in undefeated %}
+            <li>
+              <a href="/archetypes/{{ p['archetype_id'] }}">{{ p['archetype_name'] }}</a>
+              &mdash; <a href="/players/{{ p['player_id'] }}">{{ p['player_name'] }}</a>
+              (<a href="/tournaments/{{ p['tournament_id'] }}">tournament</a>{% if p['moxfield_url'] %},
+               <a href="{{ p['moxfield_url'] }}" target="_blank">list</a>{% endif %})
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No undefeated runs recorded yet.</p>
+      {% endif %}
+    </article>
+
+    <article>
+      <h2>Most played</h2>
+      {% if most_played %}
+        <ol>
+          {% for a in most_played %}
+            <li><a href="/archetypes/{{ a['id'] }}">{{ a['name'] }}</a> ({{ a['deck_count'] }} decks)</li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p>No archetypes recorded yet.</p>
+      {% endif %}
+    </article>
+
+    <article>
+      <h2>Top winrate</h2>
+      {% if top_winrate %}
+        <ol>
+          {% for a in top_winrate %}
+            <li><a href="/archetypes/{{ a['id'] }}">{{ a['name'] }}</a> ({{ "%.3f"|format(a['score']) }})</li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p>No archetypes recorded yet.</p>
+      {% endif %}
+    </article>
+  </div>
+  {% endif %}
+{% endblock %}

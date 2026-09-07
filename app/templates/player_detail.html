@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>{{ player['name'] }}</h1>
+
+  {# Bio and social links are always visible, regardless of is_public #}
+  {% if player['bio'] %}
+    <p>{{ player['bio'] }}</p>
+  {% endif %}
+  {% if player['moxfield_username'] or player['discord_username'] or player['twitch_username'] %}
+    <p>
+      {% if player['moxfield_username'] %}Moxfield: <a href="{{ player['moxfield_username'] }}" target="_blank">{{ player['moxfield_username']|username_from_url }}</a><br>{% endif %}
+      {% if player['discord_username'] %}Discord: {{ player['discord_username'] }}<br>{% endif %}
+      {% if player['twitch_username'] %}Twitch: <a href="{{ player['twitch_username'] }}" target="_blank">{{ player['twitch_username']|username_from_url }}</a><br>{% endif %}
+    </p>
+  {% endif %}
+
+  {% if rank_entry %}
+    <p><strong>Overall rank: #{{ rank_entry['rank'] }}</strong></p>
+  {% endif %}
+
+  {% if not player['is_public'] %}
+    <p><em>This player has chosen not to have their tournament history and deck records publicly aggregated.</em></p>
+  {% else %}
+    <article>
+      <h2>Record</h2>
+      <p>{{ record.wins }}W - {{ record.losses }}L - {{ record.draws }}D</p>
+    </article>
+
+    <article>
+      <h2>Stats by archetype</h2>
+      {% if archetype_stats %}
+        <table>
+          <thead><tr><th>Archetype</th><th>Tournaments</th><th>Record</th></tr></thead>
+          <tbody>
+            {% for a in archetype_stats %}
+            <tr>
+              <td><a href="/archetypes/{{ a['archetype_id'] }}">{{ a['archetype_name'] }}</a></td>
+              <td>{{ a['tournaments_played'] }}</td>
+              <td>{{ a['wins'] }}W - {{ a['losses'] }}L - {{ a['draws'] }}D</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No tournament data yet.</p>
+      {% endif %}
+    </article>
+
+    <article>
+      <h2>Decks played</h2>
+      {% if decks %}
+        <table>
+          <thead><tr><th>Archetype</th><th>Record with this deck</th><th>Decklist</th></tr></thead>
+          <tbody>
+            {% for deck in decks %}
+            <tr>
+              <td>{{ deck.archetype }}</td>
+              <td>{{ deck.wins }}W - {{ deck.losses }}L - {{ deck.draws }}D</td>
+              <td>{% if deck.moxfield_url %}<a href="{{ deck.moxfield_url }}" target="_blank" title="{{ deck.deck_name or deck.archetype }}">{{ (deck.deck_name or deck.archetype)|truncate }}</a>{% else %}<em>no list available</em>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No decks recorded yet.</p>
+      {% endif %}
+    </article>
+
+    <article>
+      <h2>Tournament history</h2>
+      {% if tournament_history %}
+        <p>
+          Sort:
+          <button onclick="sortHistory('date-desc')"><strong>Newest</strong></button>
+          <button onclick="sortHistory('date-asc')">Oldest</button>
+          <button onclick="sortHistory('record-desc')">Best record</button>
+          <button onclick="sortHistory('record-asc')">Worst record</button>
+        </p>
+        <table id="tournament-history-table">
+          <thead><tr><th>Tournament</th><th>Date</th><th>Format</th><th>Rank</th><th>Archetype</th><th>Record</th><th>Decklist</th></tr></thead>
+          <tbody>
+            {% for t in tournament_history %}
+            <tr data-date="{{ t['played_on'] }}" data-wins="{{ t['wins'] }}" data-losses="{{ t['losses'] }}">
+              <td><a href="/tournaments/{{ t['tournament_id'] }}">{{ t['tournament_name'] }}</a></td>
+              <td>{{ t['played_on'] }}</td>
+              <td>{{ t['format'] }}</td>
+              <td>{{ t['final_rank'] }}</td>
+              <td><a href="/archetypes/{{ t['archetype_id'] }}">{{ t['archetype'] }}</a></td>
+              <td>{{ t['wins'] }}W - {{ t['losses'] }}L - {{ t['draws'] }}D</td>
+              <td>{% if t['moxfield_url'] %}<a href="{{ t['moxfield_url'] }}" target="_blank">{{ (t['deck_name'] or t['archetype'])|truncate }}</a>{% else %}<em>n/a</em>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <script>
+          function sortHistory(mode) {
+            const table = document.getElementById('tournament-history-table');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            rows.sort((a, b) => {
+              if (mode === 'date-desc') return b.dataset.date.localeCompare(a.dataset.date);
+              if (mode === 'date-asc') return a.dataset.date.localeCompare(b.dataset.date);
+              if (mode === 'record-desc') {
+                const diff = parseInt(b.dataset.wins) - parseInt(a.dataset.wins);
+                return diff !== 0 ? diff : parseInt(a.dataset.losses) - parseInt(b.dataset.losses);
+              }
+              if (mode === 'record-asc') {
+                const diff = parseInt(a.dataset.wins) - parseInt(b.dataset.wins);
+                return diff !== 0 ? diff : parseInt(b.dataset.losses) - parseInt(a.dataset.losses);
+              }
+              return 0;
+            });
+            rows.forEach(row => tbody.appendChild(row));
+          }
+        </script>
+      {% else %}
+        <p>No tournament results recorded yet.</p>
+      {% endif %}
+    </article>
+
+    <article>
+      <h2>Trophy case</h2>
+      {% if trophy_case %}
+        {% for badge in trophy_case %}
+          {% if badge.type == "podium" %}
+            <h3>Podium finishes</h3>
+            <ul>
+              {% for f in badge.finishes %}
+                <li><a href="/tournaments/{{ f.tournament_id }}">{{ f.tournament_name }}</a>
+                    &mdash; {{ f.played_on }} &mdash; #{{ f.final_rank }}
+                    {% if f.undefeated %}(undefeated){% endif %}</li>
+              {% endfor %}
+            </ul>
+          {% elif badge.type == "pioneer" %}
+            <h3>Pioneer</h3>
+            <p>First to play:
+              {% for a in badge.archetypes %}
+                <a href="/archetypes/{{ a.id }}">{{ a.name }}</a>{% if not loop.last %}, {% endif %}
+              {% endfor %}
+            </p>
+          {% elif badge.type == "diversity" %}
+            <h3>Diversity ({{ badge.tier }})</h3>
+            <p>{{ badge.count }} distinct archetypes played</p>
+          {% elif badge.type == "loyalty" %}
+            <h3>Loyalty</h3>
+            <ul>
+              {% for a in badge.archetypes %}
+                <li><a href="/archetypes/{{ a.archetype_id }}">{{ a.archetype_name }}</a>
+                    &mdash; {{ a.count }} tournament entries ({{ a.tier }})</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <p>No trophies yet.</p>
+      {% endif %}
+    </article>
+  {% endif %}
+{% endblock %}

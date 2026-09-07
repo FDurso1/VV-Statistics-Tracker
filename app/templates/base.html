@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}MTG Tracker{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+</head>
+<body>
+  <nav class="container">
+    <ul><li><strong><a href="/">MTG Tracker</a></strong></li></ul>
+    <ul>
+      <li><a href="/players">Players</a></li>
+      <li><a href="/archetypes">Archetypes</a></li>
+      <li><a href="/cards">Cards</a></li>
+      <li><a href="/tournaments">Tournaments</a></li>
+      <li><a href="/visualizer">Deck Visualizer</a></li>
+    </ul>
+  </nav>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

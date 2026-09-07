@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Deck Visualizer</h1>
+
+  <form method="get" action="/visualizer">
+    <input type="url" name="url" value="{{ url }}" placeholder="Paste a Moxfield deck URL..." required>
+    <input type="hidden" name="days" value="{{ days }}">
+    <button type="submit">Visualize</button>
+  </form>
+
+  {% if error %}
+    <p><strong>{{ error }}</strong></p>
+  {% endif %}
+
+  {% if data %}
+    <h2>{{ deck_name }}</h2>
+    <p>by {{ deck_author }}</p>
+
+    {% set total = data.total_price %}
+    {% if total <= 30 %}
+      <article style="border-left: 4px solid green; padding-left: 1rem;">
+        <strong>Value Vintage legal:</strong> ${{ "%.2f"|format(total) }}
+        (mainboard ${{ "%.2f"|format(data.mainboard_total) }} + sideboard ${{ "%.2f"|format(data.sideboard_total) }})
+      </article>
+    {% else %}
+      <article style="border-left: 4px solid #b00; padding-left: 1rem;">
+        <strong>Over $30:</strong> total ${{ "%.2f"|format(total) }}
+        (mainboard ${{ "%.2f"|format(data.mainboard_total) }} + sideboard ${{ "%.2f"|format(data.sideboard_total) }})
+      </article>
+    {% endif %}
+    {% if data.missing_data_count > 0 %}
+      <p><em>{{ data.missing_data_count }} card(s) have no price data yet -- the total above may be incomplete.</em></p>
+    {% endif %}
+
+    <nav>
+      <ul>
+        <li>
+          {% if days == 7 %}
+            <strong>7 days</strong>
+          {% else %}
+            <a href="/visualizer?url={{ url | urlencode }}&days=7">7 days</a>
+          {% endif %}
+          &nbsp;|&nbsp;
+          {% if days == 30 %}
+            <strong>30 days</strong>
+          {% else %}
+            <a href="/visualizer?url={{ url | urlencode }}&days=30">30 days</a>
+          {% endif %}
+        </li>
+      </ul>
+    </nav>
+
+    <label>
+      <input type="checkbox" id="show-cheap-toggle">
+      Show cards under $0.30 (hidden by default)
+    </label>
+
+    <div style="display: flex; gap: 1rem; align-items: flex-start;">
+      <div style="flex: 2; min-width: 0; height: 450px;">
+        <canvas id="price-chart"></canvas>
+      </div>
+      <div id="chart-legend" style="flex: 1; max-height: 450px; overflow-y: auto; display: flex; gap: 0.5rem; font-size: 0.85rem;">
+        <!-- populated by JS below -->
+      </div>
+    </div>
+
+    {% macro price_table(rows, section_total, low_high_label, table_id="") %}
+      <table {% if table_id %}id="{{ table_id }}"{% endif %}>
+        <thead>
+          <tr>
+            <th>Card</th>
+            <th>Qty</th>
+            <th>Price ea.</th>
+            <th>Combined</th>
+            <th>{{ low_high_label }} Low</th>
+            <th>{{ low_high_label }} High</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for card in rows %}
+          <tr data-name="{{ card.name }}" data-price="{{ card.current_price if card.has_data and card.current_price is not none else 0 }}">
+            <td>{{ card.name }}</td>
+            <td>{{ card.quantity }}</td>
+            {% if card.has_data %}
+              <td>${{ "%.2f"|format(card.current_price) }}</td>
+              <td>${{ "%.2f"|format(card.combined_price) }}</td>
+              <td>{{ "$%.2f"|format(card.low) if card.low is not none else "-" }}</td>
+              <td>{{ "$%.2f"|format(card.high) if card.high is not none else "-" }}</td>
+            {% else %}
+              <td colspan="4"><em>no price data yet</em></td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr><td colspan="3"><strong>Section total</strong></td><td colspan="3"><strong>${{ "%.2f"|format(section_total) }}</strong></td></tr>
+        </tfoot>
+      </table>
+    {% endmacro %}
+
+    {% set low_high_label = "Monthly" if days == 30 else "Weekly" %}
+
+    <p>
+      Sort cards:
+      <button onclick="sortTables('alpha')">Alphabetical</button>
+      <button onclick="sortTables('price')">Price</button>
+    </p>
+
+    <h3>Mainboard</h3>
+    {{ price_table(data.mainboard_cards, data.mainboard_total, low_high_label, "mainboard-table") }}
+
+    {% if data.sideboard_cards %}
+    <h3>Sideboard</h3>
+    {{ price_table(data.sideboard_cards, data.sideboard_total, low_high_label, "sideboard-table") }}
+    {% endif %}
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script>
+      const cardsData = {{ data.chart_cards | tojson }};
+
+      // Distinct colors regardless of deck size, via evenly-spaced hue rotation.
+      function colorForIndex(i, total) {
+        const hue = Math.round((360 * i) / Math.max(total, 1));
+        return { h: hue, s: 70, l: 45 };
+      }
+      function hsl(c) { return `hsl(${c.h}, ${c.s}%, ${c.l}%)`; }
+      function hslaDim(c) { return `hsla(${c.h}, ${c.s}%, ${c.l}%, 0.12)`; }
+
+      const chartable = cardsData.filter(c => c.has_data && c.history.length > 0);
+      const allDates = [...new Set(chartable.flatMap(c => c.history.map(h => h.date)))].sort();
+
+      const baseColors = chartable.map((_, i) => colorForIndex(i, chartable.length));
+
+      const datasets = chartable.map((card, i) => {
+        const priceByDate = Object.fromEntries(card.history.map(h => [h.date, h.price]));
+        return {
+          label: card.name,
+          data: allDates.map(d => (d in priceByDate ? priceByDate[d] : null)),
+          borderColor: hsl(baseColors[i]),
+          backgroundColor: hsl(baseColors[i]),
+          spanGaps: true,
+          pointRadius: 2,
+          borderWidth: 2,
+          hidden: card.current_price !== null && card.current_price < 0.30,
+        };
+      });
+
+      const ctx = document.getElementById('price-chart');
+      const chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: allDates, datasets: datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { title: { display: true, text: 'Price (USD)' } } },
+          onClick: (event) => {
+            const points = chart.getElementsAtEventForMode(event, 'nearest', { intersect: true }, true);
+            if (points.length === 0) {
+              chart.data.datasets.forEach((ds, i) => { ds.borderColor = hsl(baseColors[i]); });
+            } else {
+              const clickedIndex = points[0].datasetIndex;
+              chart.data.datasets.forEach((ds, i) => {
+                ds.borderColor = i === clickedIndex ? hsl(baseColors[i]) : hslaDim(baseColors[i]);
+              });
+            }
+            chart.update();
+          }
+        }
+      });
+
+      // Build custom HTML legend with balanced columns
+      (function buildLegend() {
+        const container = document.getElementById('chart-legend');
+        const items = chartable.map((card, i) => ({ card, index: i }));
+        const colCount = items.length > 15 ? 3 : 2;
+        const perCol = Math.ceil(items.length / colCount);
+
+        for (let c = 0; c < colCount; c++) {
+          const col = document.createElement('div');
+          col.style.flex = '1';
+          const slice = items.slice(c * perCol, (c + 1) * perCol);
+          slice.forEach(({ card, index }) => {
+            const row = document.createElement('div');
+            row.style.cursor = 'pointer';
+            row.style.padding = '2px 0';
+            row.style.whiteSpace = 'nowrap';
+            row.style.overflow = 'hidden';
+            row.style.textOverflow = 'ellipsis';
+            row.dataset.legendIndex = index;
+            row.dataset.legendName = card.name;
+            row.dataset.legendPrice = card.current_price !== null ? card.current_price : 0;
+
+            const swatch = document.createElement('span');
+            swatch.style.display = 'inline-block';
+            swatch.style.width = '12px';
+            swatch.style.height = '12px';
+            swatch.style.marginRight = '4px';
+            swatch.style.borderRadius = '2px';
+            swatch.style.backgroundColor = hsl(baseColors[index]);
+            swatch.style.verticalAlign = 'middle';
+
+            const label = document.createElement('span');
+            label.textContent = card.name;
+            label.style.verticalAlign = 'middle';
+            if (chart.data.datasets[index].hidden) {
+              label.style.textDecoration = 'line-through';
+              label.style.opacity = '0.5';
+            }
+
+            row.appendChild(swatch);
+            row.appendChild(label);
+            row.addEventListener('click', () => {
+              const isHidden = !chart.isDatasetVisible(index);
+              chart.setDatasetVisibility(index, isHidden);
+              label.style.textDecoration = isHidden ? 'none' : 'line-through';
+              label.style.opacity = isHidden ? '1' : '0.5';
+              chart.update();
+            });
+            col.appendChild(row);
+          });
+          container.appendChild(col);
+        }
+      })();
+
+      document.getElementById('show-cheap-toggle').addEventListener('change', (e) => {
+        chartable.forEach((card, i) => {
+          const isCheap = card.current_price !== null && card.current_price < 0.30;
+          if (isCheap) {
+            chart.setDatasetVisibility(i, e.target.checked);
+          }
+        });
+        chart.update();
+      });
+
+      function sortTables(mode) {
+        ['mainboard-table', 'sideboard-table'].forEach(tableId => {
+          const table = document.getElementById(tableId);
+          if (!table) return;
+          const tbody = table.querySelector('tbody');
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          rows.sort((a, b) => {
+            if (mode === 'price') {
+              return parseFloat(b.dataset.price || 0) - parseFloat(a.dataset.price || 0);
+            } else {
+              return (a.dataset.name || '').localeCompare(b.dataset.name || '');
+            }
+          });
+          rows.forEach(row => tbody.appendChild(row));
+        });
+
+        // Reorder legend to match the new sort order
+        const container = document.getElementById('chart-legend');
+        const legendItems = Array.from(container.querySelectorAll('[data-legend-index]'));
+        legendItems.sort((a, b) => {
+          if (mode === 'price') {
+            return parseFloat(b.dataset.legendPrice || 0) - parseFloat(a.dataset.legendPrice || 0);
+          } else {
+            return (a.dataset.legendName || '').localeCompare(b.dataset.legendName || '');
+          }
+        });
+        // Redistribute into balanced columns
+        while (container.firstChild) container.removeChild(container.firstChild);
+        const colCount = legendItems.length > 15 ? 3 : 2;
+        const perCol = Math.ceil(legendItems.length / colCount);
+        for (let c = 0; c < colCount; c++) {
+          const col = document.createElement('div');
+          col.style.flex = '1';
+          legendItems.slice(c * perCol, (c + 1) * perCol).forEach(item => col.appendChild(item));
+          container.appendChild(col);
+        }
+      }
+    </script>
+  {% endif %}
+{% endblock %}
