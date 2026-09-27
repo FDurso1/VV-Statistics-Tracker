@@ -9,7 +9,7 @@ import sqlite3
 from datetime import date, timedelta
 from typing import Any, Literal, TypedDict
 from rapidfuzz import process, fuzz
-from app.constants import BASIC_LAND_NAMES
+from app.constants import BASIC_LAND_NAMES, UNLIMITED_QUANTITY_CARDS, VINTAGE_RESTRICTED_CARDS
 from app.scoring import win_equivalent, loss_equivalent
 from collections.abc import Mapping
 
@@ -167,6 +167,7 @@ def list_players(conn: sqlite3.Connection) -> list[Row]:
 
 def player_record(conn: sqlite3.Connection, player_id: int) -> WinLossDraw:
     """Overall W/L/D across all tournaments from tournament_standings."""
+    
     row: Row = conn.execute(
         "SELECT SUM(wins) AS wins, SUM(losses) AS losses, SUM(draws) AS draws "
         "FROM tournament_standings WHERE player_id = ?",
@@ -178,43 +179,9 @@ def player_record(conn: sqlite3.Connection, player_id: int) -> WinLossDraw:
         "draws": int(row["draws"] or 0),
     }
 
-def player_decks(conn: sqlite3.Connection, player_id: int) -> list[PlayerDeckRecord]:
-    """Every deck this player has piloted, with per-deck W/L/D."""
-    deck_ids: list[Row] = conn.execute(
-        "SELECT DISTINCT deck_id FROM tournament_standings WHERE player_id = ?",
-        (player_id,),
-    ).fetchall()
-
-    decks: list[PlayerDeckRecord] = []
-    for (deck_id,) in deck_ids:
-        deck: Row = conn.execute(
-            """
-            SELECT decks.id, decks.moxfield_url, decks.name AS deck_name,
-                   archetypes.name AS archetype, archetypes.id AS archetype_id
-            FROM decks JOIN archetypes ON decks.archetype_id = archetypes.id
-            WHERE decks.id = ?
-            """,
-            (deck_id,),
-        ).fetchone()
-        record: Row = conn.execute(
-            "SELECT SUM(wins) AS wins, SUM(losses) AS losses, SUM(draws) AS draws "
-            "FROM tournament_standings WHERE player_id = ? AND deck_id = ?",
-            (player_id, deck_id),
-        ).fetchone()
-        decks.append({
-            "id": int(deck["id"]),
-            "moxfield_url": deck["moxfield_url"],
-            "deck_name": deck["deck_name"],
-            "archetype": str(deck["archetype"]),
-            "archetype_id": int(deck["archetype_id"]),
-            "wins": int(record["wins"] or 0),
-            "losses": int(record["losses"] or 0),
-            "draws": int(record["draws"] or 0),
-        })
-    return decks
-
 def player_tournament_wins(conn: sqlite3.Connection, player_id: int) -> list[Row]:
     """Tournaments where this player placed 1st."""
+    
     return conn.execute(
         """
         SELECT tournaments.id, tournaments.name, tournaments.played_on, tournaments.format
@@ -228,6 +195,7 @@ def player_tournament_wins(conn: sqlite3.Connection, player_id: int) -> list[Row
 
 def player_leaderboard(conn: sqlite3.Connection) -> list[LeaderboardEntry]:
     """All players ranked by Bayesian win rate. Private players show rank and name only."""
+    
     rows: list[Row] = conn.execute(
         """
         SELECT p.id, p.name, p.is_public,
@@ -244,8 +212,8 @@ def player_leaderboard(conn: sqlite3.Connection) -> list[LeaderboardEntry]:
         losses: int = int(row["losses"] or 0)
         draws: int = int(row["draws"] or 0)
         score: float = bayesian_score(
-            win_equivalent(wins, losses, draws),
-            loss_equivalent(wins, losses, draws),
+            win_equivalent(wins, draws),
+            loss_equivalent(losses, draws),
         )
         scored.append({
             "id": int(row["id"]), "name": str(row["name"]),
@@ -269,6 +237,7 @@ def player_leaderboard(conn: sqlite3.Connection) -> list[LeaderboardEntry]:
 
 def player_rank(conn: sqlite3.Connection, player_id: int) -> LeaderboardEntry | None:
     """Single player's leaderboard entry."""
+    
     for entry in player_leaderboard(conn):
         if entry["id"] == player_id: #type: ignore
             return entry
@@ -400,8 +369,8 @@ def archetype_top_players(conn: sqlite3.Connection, archetype_id: int, limit: in
         losses: int = int(row["losses"] or 0)
         draws: int = int(row["draws"] or 0)
         score: float = bayesian_score(
-            win_equivalent(wins, losses, draws),
-            loss_equivalent(wins, losses, draws),
+            win_equivalent(wins, draws),
+            loss_equivalent(losses, draws),
         )
         scored.append({
             "id": int(row["id"]), "name": str(row["name"]),
@@ -409,6 +378,69 @@ def archetype_top_players(conn: sqlite3.Connection, archetype_id: int, limit: in
         })
     scored.sort(key=lambda p: (-p["score"], p["name"]))
     return scored[:limit]
+
+def all_archetypes_with_stats(conn: sqlite3.Connection, cutoff: str | None = None) -> list[dict[str, Any]]:
+    """Every archetype with aggregate stats. Optionally scoped to tournaments on or after cutoff date."""
+    
+    if cutoff:
+        rows: list[Row] = conn.execute(
+            """
+            SELECT a.id, a.name, a.primary_colors, a.style, a.variant_of,
+                   COALESCE(SUM(ts.wins), 0) AS wins,
+                   COALESCE(SUM(ts.losses), 0) AS losses,
+                   COALESCE(SUM(ts.draws), 0) AS draws,
+                   COUNT(DISTINCT ts.deck_id) AS deck_count,
+                   MAX(t.played_on) AS newest_date,
+                   MIN(d.date_added) AS pioneered_date
+            FROM archetypes a
+            LEFT JOIN decks d ON d.archetype_id = a.id
+            LEFT JOIN (
+                tournament_standings ts
+                JOIN tournaments t ON t.id = ts.tournament_id AND t.played_on >= ?
+            ) ON ts.deck_id = d.id
+            GROUP BY a.id ORDER BY a.name
+            """,
+            (cutoff,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT a.id, a.name, a.primary_colors, a.style, a.variant_of,
+                   COALESCE(SUM(ts.wins), 0) AS wins,
+                   COALESCE(SUM(ts.losses), 0) AS losses,
+                   COALESCE(SUM(ts.draws), 0) AS draws,
+                   COUNT(DISTINCT d.id) AS deck_count,
+                   MAX(t.played_on) AS newest_date,
+                   MIN(d.date_added) AS pioneered_date
+            FROM archetypes a
+            LEFT JOIN decks d ON d.archetype_id = a.id
+            LEFT JOIN tournament_standings ts ON ts.deck_id = d.id
+            LEFT JOIN tournaments t ON t.id = ts.tournament_id
+            GROUP BY a.id ORDER BY a.name
+            """,
+        ).fetchall()
+
+    result: list[dict[str, Any]] = []
+    for r in rows:
+        w: int = int(r["wins"])
+        l: int = int(r["losses"])
+        d: int = int(r["draws"])
+        score: float = bayesian_score(
+            win_equivalent(w, d), loss_equivalent(l, d),
+        )
+        result.append({
+            "id": int(r["id"]), "name": str(r["name"]),
+            "colors": str(r["primary_colors"] or ""),
+            "style": str(r["style"] or ""),
+            "variant_of": str(r["variant_of"] or ""),
+            "wins": w, "losses": l, "draws": d,
+            "deck_count": int(r["deck_count"]),
+            "newest_date": str(r["newest_date"] or ""),
+            "score": round(score, 4),
+            "pioneered_date": str(r["pioneered_date"] or ""),
+        })
+    return result
+
 
 # ---------- cards ----------
 
@@ -464,8 +496,8 @@ def card_winrate(conn: sqlite3.Connection, card_id: int) -> WinLossDrawScore:
     losses: int = int(row["losses"] or 0)
     draws: int = int(row["draws"] or 0)
     score: float = bayesian_score(
-        win_equivalent(wins, losses, draws),
-        loss_equivalent(wins, losses, draws),
+        win_equivalent(wins, draws),
+        loss_equivalent(losses, draws),
     )
     return {"wins": wins, "losses": losses, "draws": draws, "score": score}
 
@@ -528,8 +560,8 @@ def card_winrate_by_name(conn: sqlite3.Connection, card_name: str) -> WinLossDra
     losses: int = int(row["losses"] or 0)
     draws: int = int(row["draws"] or 0)
     score: float = bayesian_score(
-        win_equivalent(wins, losses, draws),
-        loss_equivalent(wins, losses, draws),
+        win_equivalent(wins, draws),
+        loss_equivalent(losses, draws),
     )
     return {"wins": wins, "losses": losses, "draws": draws, "score": score}
 
@@ -539,10 +571,104 @@ def random_card_name(conn: sqlite3.Connection) -> str | None:
     names: list[str] = [r[0] for r in conn.execute("SELECT name FROM cards")]
     return random.choice(names) if names else None
 
+def all_cards_with_stats(
+    conn: sqlite3.Connection,
+    cutoff: str | None = None,
+    exclude_banned: bool = False,
+) -> list[dict[str, Any]]:
+    """Every tournament-seen card with aggregate stats plus an adjusted
+    score weighting wins/losses by copies played. Weight rules: unlimited-
+    quantity cards use raw mainboard_quantity (no cap), restricted cards
+    count as 4 (so 1-of restricteds aren't undervalued), everything else
+    caps at MIN(4, mainboard_quantity). exclude_banned drops all
+    contributions from archetypes that used Nadu."""
+    
+    unlimited_ph: str = ",".join("?" * len(UNLIMITED_QUANTITY_CARDS))
+    restricted_ph: str = ",".join("?" * len(VINTAGE_RESTRICTED_CARDS))
+    unlimited_list: list[str] = list(UNLIMITED_QUANTITY_CARDS)
+    restricted_list: list[str] = list(VINTAGE_RESTRICTED_CARDS)
+
+    weight_expr: str = f"""(CASE
+        WHEN c.name IN ({unlimited_ph}) THEN dc.mainboard_quantity
+        WHEN c.name IN ({restricted_ph}) THEN 4
+        WHEN dc.mainboard_quantity > 4 THEN 4
+        ELSE dc.mainboard_quantity
+    END)"""
+
+    conditions: list[str] = []
+    if cutoff is not None:
+        conditions.append("t.played_on >= ?")
+    if exclude_banned:
+        conditions.append("NOT ((';' || UPPER(REPLACE(COALESCE(a.style, ''), ' ', '')) || ';') LIKE '%;BANNED;%')")
+    contribution_valid: str = " AND ".join(conditions) if conditions else "1=1"
+
+    cv_params: list[str] = [cutoff] if cutoff is not None else []
+    we_params: list[str] = unlimited_list + restricted_list
+
+    # Parameter order matches the SELECT clauses below:
+    #   wins, losses, draws use cv only
+    #   weighted_wins, weighted_losses use cv + we
+    #   total_copies, deck_count, archetype_count use cv only
+    params: list[Any] = (
+        cv_params * 3
+        + cv_params + we_params
+        + cv_params + we_params
+        + cv_params * 3
+    )
+
+    sql: str = f"""
+        SELECT c.id, c.name, c.first_seen_date,
+            COALESCE(SUM(CASE WHEN {contribution_valid} THEN ts.wins ELSE 0 END), 0) AS wins,
+            COALESCE(SUM(CASE WHEN {contribution_valid} THEN ts.losses ELSE 0 END), 0) AS losses,
+            COALESCE(SUM(CASE WHEN {contribution_valid} THEN ts.draws ELSE 0 END), 0) AS draws,
+            COALESCE(SUM(CASE WHEN {contribution_valid} THEN ts.wins * {weight_expr} ELSE 0 END), 0) AS weighted_wins,
+            COALESCE(SUM(CASE WHEN {contribution_valid} THEN ts.losses * {weight_expr} ELSE 0 END), 0) AS weighted_losses,
+            COALESCE(SUM(CASE WHEN {contribution_valid} THEN dc.quantity ELSE 0 END), 0) AS total_copies,
+            COUNT(DISTINCT CASE WHEN {contribution_valid} THEN dc.deck_id END) AS deck_count,
+            COUNT(DISTINCT CASE WHEN {contribution_valid} THEN d.archetype_id END) AS archetype_count,
+            (SELECT price FROM card_price_cache
+             WHERE card_name = c.name ORDER BY price_date DESC LIMIT 1) AS current_price
+        FROM cards c
+        LEFT JOIN deck_cards dc ON dc.card_id = c.id
+        LEFT JOIN decks d ON d.id = dc.deck_id
+        LEFT JOIN archetypes a ON a.id = d.archetype_id
+        LEFT JOIN tournament_standings ts ON ts.deck_id = dc.deck_id
+        LEFT JOIN tournaments t ON t.id = ts.tournament_id
+        GROUP BY c.id
+        ORDER BY c.name
+    """
+
+    rows: list[Row] = conn.execute(sql, params).fetchall()
+
+    result: list[dict[str, Any]] = []
+    for r in rows:
+        name: str = str(r["name"])
+        w: int = int(r["wins"])
+        l: int = int(r["losses"])
+        d: int = int(r["draws"])
+        ww: int = int(r["weighted_wins"])
+        wl: int = int(r["weighted_losses"])
+        score: float = bayesian_score(
+            win_equivalent(w, d), loss_equivalent(l, d),
+        )
+        adjusted: float = bayesian_score(ww, wl)
+        result.append({
+            "id": int(r["id"]), "name": name,
+            "first_seen_date": str(r["first_seen_date"] or ""),
+            "wins": w, "losses": l, "draws": d,
+            "total_copies": int(r["total_copies"]),
+            "deck_count": int(r["deck_count"]),
+            "archetype_count": int(r["archetype_count"]),
+            "current_price": float(r["current_price"]) if r["current_price"] is not None else None,
+            "score": round(score, 4),
+            "adjusted_score": round(adjusted, 4),
+            "is_basic": name in BASIC_LAND_NAMES,
+        })
+    return result
+
 # ---------- tournaments ----------
 
 def search_tournaments(conn: sqlite3.Connection, query: str, limit: int = 5, score_cutoff: int = 60) -> list[SearchResult]:
-    # kinda useless rn given naming structure, but will be important once paper tournaments added
     
     rows: list[Row] = conn.execute("SELECT id, name FROM tournaments").fetchall()
     names: dict[str, Row] = {row["name"]: row for row in rows}
@@ -622,6 +748,8 @@ def tournament_final_standings(conn: sqlite3.Connection, tournament_id: str) -> 
 def deck_visualizer_data(conn: sqlite3.Connection, card_info: Mapping[str, Mapping[str, Any]], days: int) -> DeckVisualizerData:
     """Build chart and table data for the deck visualizer."""
     
+    #TODO: Improve table quality
+    
     names: list[str] = list(card_info.keys())
     if not names:
         return {
@@ -690,9 +818,8 @@ def deck_visualizer_data(conn: sqlite3.Connection, card_info: Mapping[str, Mappi
     ]
     chart_cards.sort(key=lambda c: c["name"])
 
-    def build_section(
-        board_quantity_key: str,
-    ) -> tuple[list[DeckSectionRow], float]:
+    def build_section(board_quantity_key: str) -> tuple[list[DeckSectionRow], float]:
+        
         section_rows: list[DeckSectionRow] = []
         section_total: float = 0.0
         for name, info in card_info.items():
@@ -857,14 +984,26 @@ def _tier_for_count(count: int) -> TrophyTier | None:
     return None
 
 def _podium_finishes(conn: sqlite3.Connection, player_id: int) -> list[PodiumFinish]:
-
+    """Top-3 finishes always, plus top-8 in tournaments with 8+ rounds
+    (measured by the max wins+losses+draws of any player in that
+    tournament). Notes undefeated runs."""
+    
     rows: list[Row] = conn.execute(
         """
         SELECT ts.final_rank, ts.losses, t.id AS tournament_id,
-               t.name AS tournament_name, t.played_on
+               t.name AS tournament_name, t.played_on,
+               (SELECT MAX(wins + losses + draws)
+                FROM tournament_standings
+                WHERE tournament_id = t.id) AS tournament_rounds
         FROM tournament_standings ts
         JOIN tournaments t ON t.id = ts.tournament_id
-        WHERE ts.player_id = ? AND ts.final_rank <= 3
+        WHERE ts.player_id = ?
+          AND (ts.final_rank <= 3
+               OR (ts.final_rank <= 8 AND (
+                   SELECT MAX(wins + losses + draws)
+                   FROM tournament_standings
+                   WHERE tournament_id = t.id
+               ) >= 8))
         ORDER BY t.played_on DESC
         """,
         (player_id,),
@@ -891,16 +1030,17 @@ def _pioneer_archetypes(conn: sqlite3.Connection, player_id: int) -> list[Pionee
         )
         WHERE d.player_id = ? AND a.unclaimable = 0
         """, # unclaimable ones are ones that are too broad to really be awarded to one player
+            # or are pre-existing from before 2026
         (player_id,),
     ).fetchall()
     return [{"id": int(r["id"]), "name": str(r["name"])} for r in rows]
 
 def _distinct_archetypes_played(conn: sqlite3.Connection, player_id: int) -> int:
+    
     return int(conn.execute(
         "SELECT COUNT(DISTINCT archetype_id) FROM decks WHERE player_id = ?",
         (player_id,),
     ).fetchone()[0])
-
 
 def _archetype_loyalty_entries(conn: sqlite3.Connection, player_id: int) -> list[Row]:
 
@@ -967,7 +1107,8 @@ def top_cards_by_recent_tournaments(conn: sqlite3.Connection, tournament_count: 
     basic_placeholders: str = ",".join("?" * len(BASIC_LAND_NAMES))
     return conn.execute(
         f"""
-        SELECT c.id, c.name, COUNT(DISTINCT dc.deck_id) AS deck_count
+        SELECT c.id, c.name, COUNT(DISTINCT dc.deck_id) AS deck_count,
+               COUNT(DISTINCT d.archetype_id) AS archetype_count
         FROM deck_cards dc
         JOIN cards c ON c.id = dc.card_id
         JOIN decks d ON d.id = dc.deck_id
@@ -981,10 +1122,65 @@ def top_cards_by_recent_tournaments(conn: sqlite3.Connection, tournament_count: 
         tid_list + list(BASIC_LAND_NAMES) + [limit],
     ).fetchall()
 
+
+def top_cards_by_winrate(
+    conn: sqlite3.Connection, limit: int = 10, recent_days: int | None = None,
+    exclude_basics: bool = True,
+) -> list[dict[str, Any]]:
+    """Cards ranked by Bayesian win rate. Optionally scoped to recent days."""
+    
+    if recent_days is not None:
+        cutoff: str = (date.today() - timedelta(days=recent_days)).isoformat()
+        rows: list[Row] = conn.execute(
+            """
+            SELECT c.name,
+                   SUM(ts.wins) AS wins, SUM(ts.losses) AS losses, SUM(ts.draws) AS draws
+            FROM deck_cards dc
+            JOIN cards c ON c.id = dc.card_id
+            JOIN tournament_standings ts ON ts.deck_id = dc.deck_id
+            JOIN tournaments t ON t.id = ts.tournament_id
+            WHERE t.played_on >= ?
+            GROUP BY c.id
+            """,
+            (cutoff,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT c.name,
+                   SUM(ts.wins) AS wins, SUM(ts.losses) AS losses, SUM(ts.draws) AS draws
+            FROM deck_cards dc
+            JOIN cards c ON c.id = dc.card_id
+            JOIN tournament_standings ts ON ts.deck_id = dc.deck_id
+            GROUP BY c.id
+            """,
+        ).fetchall()
+
+    scored: list[dict[str, Any]] = []
+    for row in rows:
+        name: str = str(row["name"])
+        if exclude_basics and name in BASIC_LAND_NAMES:
+            continue
+        wins: int = int(row["wins"] or 0)
+        losses: int = int(row["losses"] or 0)
+        draws: int = int(row["draws"] or 0)
+        score: float = bayesian_score(
+            win_equivalent(wins, draws),
+            loss_equivalent(losses, draws),
+        )
+        scored.append({
+            "name": name, "wins": wins, "losses": losses, "draws": draws,
+            "score": score, "is_basic": name in BASIC_LAND_NAMES,
+        })
+    scored.sort(key=lambda c: -c["score"])
+    return scored[:limit]
+
 def random_card_id(conn: sqlite3.Connection) -> int | None:
 
     ids: list[int] = [r[0] for r in conn.execute("SELECT id FROM cards")]
-    return random.choice(ids) if ids else None
+    if ids:
+        return random.choice(ids)
+    return None
 
 # ---------- player page: tournament history + archetype stats ----------
 
@@ -1026,4 +1222,48 @@ def player_archetype_stats(conn: sqlite3.Connection, player_id: int) -> list[Row
         """,
         (player_id,),
     ).fetchall()
+
+# ---------- deck visualizer deck price when played ----------
+
+class DeckPriceSnapshot(TypedDict):
+    moxfield_deck_id: str
+    tournament_id: str
+    tournament_name: str
+    played_on: str
+    total_price: float
+    player_id: int | None
+    player_name: str | None
+
+def get_deck_price_snapshot(
+    conn: sqlite3.Connection, moxfield_deck_id: str,
+) -> DeckPriceSnapshot | None:
+    """Return the stored historical price snapshot for a Moxfield deck
+    (by its extracted deck ID), or None if we don't have one."""
+    
+    row: Row | None = conn.execute(
+        """
+        SELECT s.moxfield_deck_id, s.tournament_id, s.played_on, s.total_price,
+               t.name AS tournament_name,
+               p.id AS player_id, p.name AS player_name
+        FROM deck_price_snapshots s
+        LEFT JOIN tournaments t ON t.id = s.tournament_id
+        LEFT JOIN decks d ON d.moxfield_url LIKE '%' || s.moxfield_deck_id
+        LEFT JOIN tournament_standings ts
+            ON ts.deck_id = d.id AND ts.tournament_id = s.tournament_id
+        LEFT JOIN players p ON p.id = ts.player_id
+        WHERE s.moxfield_deck_id = ?
+        """,
+        (moxfield_deck_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "moxfield_deck_id": str(row["moxfield_deck_id"]),
+        "tournament_id": str(row["tournament_id"]),
+        "tournament_name": str(row["tournament_name"] or row["tournament_id"]),
+        "played_on": str(row["played_on"]),
+        "total_price": float(row["total_price"]),
+        "player_id": int(row["player_id"]) if row["player_id"] is not None else None,
+        "player_name": str(row["player_name"]) if row["player_name"] is not None else None,
+    }
     

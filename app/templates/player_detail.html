@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block content %}
   <h1>{{ player['name'] }}</h1>
@@ -19,7 +20,7 @@
   {% endif %}
 
   {% if not player['is_public'] %}
-    <p><em>This player has chosen not to have their tournament history and deck records publicly aggregated.</em></p>
+    <p><em>This player has not chosen to have their tournament history and deck records publicly aggregated.</em></p>
   {% else %}
     <article>
       <h2>Record</h2>
@@ -29,7 +30,7 @@
     <article>
       <h2>Stats by archetype</h2>
       {% if archetype_stats %}
-        <table>
+        <table id="archetype-stats-table">
           <thead><tr><th>Archetype</th><th>Tournaments</th><th>Record</th></tr></thead>
           <tbody>
             {% for a in archetype_stats %}
@@ -41,28 +42,9 @@
             {% endfor %}
           </tbody>
         </table>
+        <p id="archetype-stats-pagination"></p>
       {% else %}
         <p>No tournament data yet.</p>
-      {% endif %}
-    </article>
-
-    <article>
-      <h2>Decks played</h2>
-      {% if decks %}
-        <table>
-          <thead><tr><th>Archetype</th><th>Record with this deck</th><th>Decklist</th></tr></thead>
-          <tbody>
-            {% for deck in decks %}
-            <tr>
-              <td>{{ deck.archetype }}</td>
-              <td>{{ deck.wins }}W - {{ deck.losses }}L - {{ deck.draws }}D</td>
-              <td>{% if deck.moxfield_url %}<a href="{{ deck.moxfield_url }}" target="_blank" title="{{ deck.deck_name or deck.archetype }}">{{ (deck.deck_name or deck.archetype)|truncate }}</a>{% else %}<em>no list available</em>{% endif %}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p>No decks recorded yet.</p>
       {% endif %}
     </article>
 
@@ -71,10 +53,12 @@
       {% if tournament_history %}
         <p>
           Sort:
-          <button onclick="sortHistory('date-desc')"><strong>Newest</strong></button>
-          <button onclick="sortHistory('date-asc')">Oldest</button>
-          <button onclick="sortHistory('record-desc')">Best record</button>
-          <button onclick="sortHistory('record-asc')">Worst record</button>
+          <span id="hist-sort-buttons">
+            <button onclick="sortHistory('date-desc')">Newest</button>
+            <button onclick="sortHistory('date-asc')">Oldest</button>
+            <button onclick="sortHistory('record-desc')">Best record</button>
+            <button onclick="sortHistory('record-asc')">Worst record</button>
+          </span>
         </p>
         <table id="tournament-history-table">
           <thead><tr><th>Tournament</th><th>Date</th><th>Format</th><th>Rank</th><th>Archetype</th><th>Record</th><th>Decklist</th></tr></thead>
@@ -92,27 +76,7 @@
             {% endfor %}
           </tbody>
         </table>
-        <script>
-          function sortHistory(mode) {
-            const table = document.getElementById('tournament-history-table');
-            const tbody = table.querySelector('tbody');
-            const rows = Array.from(tbody.querySelectorAll('tr'));
-            rows.sort((a, b) => {
-              if (mode === 'date-desc') return b.dataset.date.localeCompare(a.dataset.date);
-              if (mode === 'date-asc') return a.dataset.date.localeCompare(b.dataset.date);
-              if (mode === 'record-desc') {
-                const diff = parseInt(b.dataset.wins) - parseInt(a.dataset.wins);
-                return diff !== 0 ? diff : parseInt(a.dataset.losses) - parseInt(b.dataset.losses);
-              }
-              if (mode === 'record-asc') {
-                const diff = parseInt(a.dataset.wins) - parseInt(b.dataset.wins);
-                return diff !== 0 ? diff : parseInt(b.dataset.losses) - parseInt(a.dataset.losses);
-              }
-              return 0;
-            });
-            rows.forEach(row => tbody.appendChild(row));
-          }
-        </script>
+        <p id="hist-pagination"></p>
       {% else %}
         <p>No tournament results recorded yet.</p>
       {% endif %}
@@ -127,7 +91,7 @@
             <ul>
               {% for f in badge.finishes %}
                 <li><a href="/tournaments/{{ f.tournament_id }}">{{ f.tournament_name }}</a>
-                    &mdash; {{ f.played_on }} &mdash; #{{ f.final_rank }}
+                    - {{ f.played_on }} - #{{ f.final_rank }}
                     {% if f.undefeated %}(undefeated){% endif %}</li>
               {% endfor %}
             </ul>
@@ -146,7 +110,7 @@
             <ul>
               {% for a in badge.archetypes %}
                 <li><a href="/archetypes/{{ a.archetype_id }}">{{ a.archetype_name }}</a>
-                    &mdash; {{ a.count }} tournament entries ({{ a.tier }})</li>
+                    - {{ a.count }} tournament entries ({{ a.tier }})</li>
               {% endfor %}
             </ul>
           {% endif %}
@@ -155,5 +119,85 @@
         <p>No trophies yet.</p>
       {% endif %}
     </article>
+
+    <script>
+      const PAGE_SIZE = 10;
+
+      function updateActiveButton(containerId, clickedBtn) {
+        document.querySelectorAll('#' + containerId + ' button').forEach(b => {
+          b.style.fontWeight = b === clickedBtn ? 'bold' : 'normal';
+        });
+      }
+
+      function renderPagination(containerId, totalRows, currentPage, goFnName) {
+        const pag = document.getElementById(containerId);
+        if (!pag) return;
+        const totalPages = Math.ceil(totalRows / PAGE_SIZE);
+        if (totalPages <= 1) { pag.innerHTML = ''; return; }
+        let html = '';
+        if (currentPage > 0) html += '<a href="#" onclick="' + goFnName + '(' + (currentPage - 1) + '); return false;">&laquo; Prev</a> ';
+        html += 'Page ' + (currentPage + 1) + ' of ' + totalPages;
+        if (currentPage < totalPages - 1) html += ' <a href="#" onclick="' + goFnName + '(' + (currentPage + 1) + '); return false;">Next &raquo;</a>';
+        pag.innerHTML = html;
+      }
+
+      function paginateTable(tableId, currentPage) {
+        const tbody = document.querySelector('#' + tableId + ' tbody');
+        if (!tbody) return 0;
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const start = currentPage * PAGE_SIZE;
+        const end = start + PAGE_SIZE;
+        rows.forEach((r, i) => r.style.display = (i >= start && i < end) ? '' : 'none');
+        return rows.length;
+      }
+
+      // Stats by archetype
+      let archStatsPage = 0;
+      function renderArchStats() {
+        const total = paginateTable('archetype-stats-table', archStatsPage);
+        renderPagination('archetype-stats-pagination', total, archStatsPage, 'goArchStatsPage');
+      }
+      function goArchStatsPage(p) { archStatsPage = p; renderArchStats(); }
+
+      // Tournament history
+      let histPage = 0;
+      let histSort = 'date-desc';
+      function renderHistory() {
+        const tbody = document.querySelector('#tournament-history-table tbody');
+        if (!tbody) return;
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort((a, b) => {
+          if (histSort === 'date-desc') return b.dataset.date.localeCompare(a.dataset.date);
+          if (histSort === 'date-asc') return a.dataset.date.localeCompare(b.dataset.date);
+          if (histSort === 'record-desc') {
+            const diff = parseInt(b.dataset.wins) - parseInt(a.dataset.wins);
+            return diff !== 0 ? diff : parseInt(a.dataset.losses) - parseInt(b.dataset.losses);
+          }
+          if (histSort === 'record-asc') {
+            const diff = parseInt(a.dataset.wins) - parseInt(b.dataset.wins);
+            return diff !== 0 ? diff : parseInt(b.dataset.losses) - parseInt(a.dataset.losses);
+          }
+          return 0;
+        });
+        rows.forEach(r => tbody.appendChild(r));
+        const start = histPage * PAGE_SIZE;
+        const end = start + PAGE_SIZE;
+        rows.forEach((r, i) => r.style.display = (i >= start && i < end) ? '' : 'none');
+        renderPagination('hist-pagination', rows.length, histPage, 'goHistPage');
+      }
+      function sortHistory(mode) {
+        histSort = mode;
+        histPage = 0;
+        updateActiveButton('hist-sort-buttons', event.target);
+        renderHistory();
+      }
+      function goHistPage(p) { histPage = p; renderHistory(); }
+
+      // Initial render
+      const histBtn = document.querySelector('#hist-sort-buttons button');
+      if (histBtn) histBtn.style.fontWeight = 'bold';
+      renderArchStats();
+      renderHistory();
+    </script>
   {% endif %}
 {% endblock %}

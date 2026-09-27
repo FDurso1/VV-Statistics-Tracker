@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block content %}
   <h1>{{ tournament['name'] }}</h1>
@@ -8,7 +9,7 @@
     <h2>Final standings</h2>
     <p><em>Ties decided based on tournament results.</em></p>
     {% if standings %}
-      <table>
+      <table id="standings-table">
         <thead><tr><th>Rank</th><th>Player</th><th>Archetype</th><th>Score</th></tr></thead>
         <tbody>
           {% for row in standings %}
@@ -21,6 +22,7 @@
           {% endfor %}
         </tbody>
       </table>
+      <p id="standings-pagination"></p>
     {% else %}
       <p>No final standings recorded for this tournament yet.</p>
     {% endif %}
@@ -47,5 +49,32 @@
         </table>
       {% endfor %}
     </article>
+  {% endif %}
+
+  {% if standings %}
+    <script>
+      const STANDINGS_PAGE_SIZE = 10;
+      let standingsPage = 0;
+
+      function renderStandings() {
+        const tbody = document.querySelector('#standings-table tbody');
+        if (!tbody) return;
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const start = standingsPage * STANDINGS_PAGE_SIZE;
+        const end = start + STANDINGS_PAGE_SIZE;
+        rows.forEach((r, i) => r.style.display = (i >= start && i < end) ? '' : 'none');
+
+        const pag = document.getElementById('standings-pagination');
+        const totalPages = Math.ceil(rows.length / STANDINGS_PAGE_SIZE);
+        if (totalPages <= 1) { pag.innerHTML = ''; return; }
+        let html = '';
+        if (standingsPage > 0) html += '<a href="#" onclick="goStandingsPage(' + (standingsPage - 1) + '); return false;">&laquo; Prev</a> ';
+        html += 'Page ' + (standingsPage + 1) + ' of ' + totalPages;
+        if (standingsPage < totalPages - 1) html += ' <a href="#" onclick="goStandingsPage(' + (standingsPage + 1) + '); return false;">Next &raquo;</a>';
+        pag.innerHTML = html;
+      }
+      function goStandingsPage(p) { standingsPage = p; renderStandings(); }
+      renderStandings();
+    </script>
   {% endif %}
 {% endblock %}

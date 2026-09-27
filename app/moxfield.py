@@ -11,7 +11,7 @@ load_dotenv()
 
 API_URL: str = "https://api2.moxfield.com/v3/decks/all/{deck_id}"
 USER_AGENT_ENV_VAR: str = "MOXFIELD_USER_AGENT"
-_MIN_INTERVAL_SECONDS: float = 5.0
+_MIN_INTERVAL_SECONDS: float = 5.0 # theoretically can be 1 second, but in practice failed. 5 is safer.
 _last_request_at: float = 0.0
 
 class CardInfo(TypedDict):

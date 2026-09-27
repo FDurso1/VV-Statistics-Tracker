@@ -7,11 +7,13 @@ import sqlite3
 
 from flask import Blueprint, render_template, request, abort, redirect, url_for
 from werkzeug.wrappers import Response
+from datetime import date, timedelta
 
 from app.db import get_db
 from app import queries
 from app.moxfield import fetch_deck, DeckResult
 from typing import Any
+from app.moxfield import extract_deck_id
 
 bp: Blueprint = Blueprint("main", __name__)
 
@@ -30,6 +32,7 @@ def index() -> str:
 @bp.route("/players")
 def players_index() -> str:
     """Leaderboard with optional hide-private toggle."""
+    
     q: str = request.args.get("q", "").strip()
     hide_private: bool = request.args.get("hide_private") == "1"
     db: sqlite3.Connection = get_db()
@@ -58,9 +61,7 @@ def player_detail(player_id: int) -> str:
         abort(404)
 
     rank_entry: queries.LeaderboardEntry | None = queries.player_rank(db, player_id)
-
     record: queries.WinLossDraw | None = None
-    decks: list[queries.PlayerDeckRecord] | None = None
     tournament_wins: list[sqlite3.Row] | None = None
     trophy_case: list[queries.TrophyBadge] | None = None
     tournament_history: list[sqlite3.Row] | None = None
@@ -68,7 +69,6 @@ def player_detail(player_id: int) -> str:
 
     if player["is_public"]:
         record = queries.player_record(db, player_id)
-        decks = queries.player_decks(db, player_id)
         tournament_wins = queries.player_tournament_wins(db, player_id)
         trophy_case = queries.player_trophy_case(db, player_id)
         tournament_history = queries.player_tournament_history(db, player_id)
@@ -80,7 +80,6 @@ def player_detail(player_id: int) -> str:
         player=player,
         rank_entry=rank_entry,
         record=record,
-        decks=decks,
         tournament_wins=tournament_wins,
         trophy_case=trophy_case,
         tournament_history=tournament_history,
@@ -95,10 +94,23 @@ def archetypes_index() -> str:
         results: list[sqlite3.Row] = [
             row for row, _ in queries.search_archetypes(db, q)
         ]
+        db.close()
+        return render_template(
+            "archetypes.html", archetypes=results, query=q,
+            undefeated=None, alltime_json="[]", recent_json="[]",
+        )
     else:
-        results = queries.list_archetypes(db)
-    db.close()
-    return render_template("archetypes.html", archetypes=results, query=q)
+        undefeated = queries.recent_undefeated_placements(db, limit=3)
+        cutoff: str = (date.today() - timedelta(days=90)).isoformat()
+        alltime: list[dict[str, Any]] = queries.all_archetypes_with_stats(db)
+        recent: list[dict[str, Any]] = queries.all_archetypes_with_stats(db, cutoff=cutoff)
+        db.close()
+        return render_template(
+            "archetypes.html", archetypes=None, query=q,
+            undefeated=undefeated,
+            alltime_json=json.dumps(alltime),
+            recent_json=json.dumps(recent),
+        )
 
 @bp.route("/archetypes/random")
 def archetype_random() -> Response:
@@ -127,12 +139,9 @@ def archetype_detail(archetype_id: int) -> str:
         queries.recent_undefeated_placements(db, archetype_id=archetype_id, limit=1)
     )
 
-    page: int = max(1, request.args.get("page", 1, type=int))
-    page_size: int = 15
     recent_results: list[sqlite3.Row] = queries.archetype_recent_results(
-        db, archetype_id, limit=page_size, offset=(page - 1) * page_size,
+        db, archetype_id, limit=500, offset=0,
     )
-    has_more_results: bool = len(recent_results) == page_size
 
     recent_only: bool = request.args.get("recent") == "1"
     card_stats: list[sqlite3.Row] = queries.archetype_card_stats(
@@ -149,15 +158,13 @@ def archetype_detail(archetype_id: int) -> str:
         top_players=top_players,
         pinned_undefeated=pinned_undefeated[0] if pinned_undefeated else None,
         recent_results=recent_results,
-        page=page,
-        has_more_results=has_more_results,
         card_stats=card_stats,
         recent_only=recent_only,
     )
 
 @bp.route("/cards")
 def cards_index() -> str | Response:
-
+    """Card search with exact-match redirect (case/punctuation insensitive)."""
     q: str = request.args.get("q", "").strip()
     db: sqlite3.Connection = get_db()
     if q:
@@ -186,6 +193,7 @@ def cards_index() -> str | Response:
                     if _normalize_card_query(row[0]) == norm_q:
                         exact = row
                         break
+
         if exact:
             db.close()
             return redirect(url_for("main.card_detail", card_name=exact["card_name"]))
@@ -193,14 +201,29 @@ def cards_index() -> str | Response:
         results: list[sqlite3.Row] = [
             row for row, _ in queries.search_cards(db, q)
         ]
-        top_cards: list[sqlite3.Row] | None = None
+        db.close()
+        return render_template(
+            "cards.html", cards=results, query=q,
+            top_cards=None,  alltime_with_json="[]", alltime_no_json="[]",
+            recent_with_json="[]", recent_no_json="[]",
+        )
     else:
-        results = None  # type: ignore[assignment]
-        top_cards = queries.top_cards_by_recent_tournaments(
+        top_cards: list[sqlite3.Row] = queries.top_cards_by_recent_tournaments(
             db, tournament_count=3, limit=5,
         )
-    db.close()
-    return render_template("cards.html", cards=results, query=q, top_cards=top_cards)
+        cutoff: str = (date.today() - timedelta(days=30)).isoformat()
+        alltime_with: list[dict[str, Any]] = queries.all_cards_with_stats(db, exclude_banned=False)
+        alltime_no: list[dict[str, Any]] = queries.all_cards_with_stats(db, exclude_banned=True)
+        recent_with: list[dict[str, Any]] = queries.all_cards_with_stats(db, cutoff=cutoff, exclude_banned=False)
+        recent_no: list[dict[str, Any]] = queries.all_cards_with_stats(db, cutoff=cutoff, exclude_banned=True)
+        db.close()
+        return render_template(
+            "cards.html", cards=None, query=q, top_cards=top_cards,
+            alltime_with_json=json.dumps(alltime_with),
+            alltime_no_json=json.dumps(alltime_no),
+            recent_with_json=json.dumps(recent_with),
+            recent_no_json=json.dumps(recent_no),
+        )
 
 @bp.route("/cards/random")
 def card_random() -> Response:
@@ -238,34 +261,14 @@ def card_detail(card_name: str) -> str:
         price_history_json=price_history_json,
     )
 
+
 @bp.route("/tournaments")
 def tournaments_index() -> str:
-    q: str = request.args.get("q", "").strip()
-    format_filter: str = request.args.get("format", "").strip()
-    date_from: str = request.args.get("date_from", "").strip()
-    date_to: str = request.args.get("date_to", "").strip()
-
     db: sqlite3.Connection = get_db()
-    if q:
-        results: list[sqlite3.Row] = [
-            row for row, _ in queries.search_tournaments(db, q)
-        ]
-    else:
-        results = queries.list_tournaments(
-            db,
-            format=format_filter or None,
-            date_from=date_from or None,
-            date_to=date_to or None,
-        )
+    tournaments: list[sqlite3.Row] = queries.list_tournaments(db)
     db.close()
-    return render_template(
-        "tournaments.html",
-        tournaments=results,
-        query=q,
-        format=format_filter,
-        date_from=date_from,
-        date_to=date_to,
-    )
+    return render_template("tournaments.html", tournaments=tournaments)
+
 
 @bp.route("/tournaments/<tournament_id>")
 def tournament_detail(tournament_id: str) -> str:
@@ -298,18 +301,24 @@ def deck_visualizer() -> str:
     if not url:
         return render_template(
             "deck_visualizer.html", url="", days=days,
-            deck_name=None, deck_author=None, data=None, error=None,
+            deck_name=None, deck_author=None, data=None, 
+            error=None, price_snapshot=None
         )
 
     error: str | None = None
     data: queries.DeckVisualizerData | None = None
     deck_name: str | None = None
     deck_author: str | None = None
+    price_snapshot: queries.DeckPriceSnapshot | None = None
     db: sqlite3.Connection = get_db()
     try:
         deck: DeckResult = fetch_deck(url)
         deck_name = deck["name"]
         deck_author = deck["author"]
+        deck_id: str = extract_deck_id(url)
+        price_snapshot: queries.DeckPriceSnapshot | None = (
+            queries.get_deck_price_snapshot(db, deck_id) if deck_id else None
+        )
         data = queries.deck_visualizer_data(db, deck["cards"], days)
     except Exception as e:
         error = f"Couldn't load that deck: {e}"
@@ -319,5 +328,5 @@ def deck_visualizer() -> str:
     return render_template(
         "deck_visualizer.html", url=url, days=days,
         deck_name=deck_name, deck_author=deck_author, data=data, error=error,
+        price_snapshot=price_snapshot,
     )
-    

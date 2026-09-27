@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block content %}
   <h1>{{ archetype['name'] }}</h1>
@@ -18,7 +19,7 @@
     <h2>Details</h2>
     <p>
       {% if archetype['primary_colors'] %}<strong>Colors:</strong> {{ archetype['primary_colors'] }}<br>{% endif %}
-      {% if archetype['variant_of'] %}<strong>Variant of:</strong> {{ archetype['variant_of'] }}<br>{% endif %}
+      {% comment %} {% if archetype['variant_of'] %}<strong>Variant of:</strong> {{ archetype['variant_of'] }}<br>{% endif %} {% endcomment %}
       <strong>Style:</strong> {{ archetype['style'] }}
     </p>
   </article>
@@ -31,7 +32,7 @@
 
   <article>
     <h2>Overall winrate</h2>
-    <p>{{ winrate.wins }}W &ndash; {{ winrate.losses }}L &ndash; {{ winrate.draws }}D</p>
+    <p>{{ winrate.wins }}W - {{ winrate.losses }}L - {{ winrate.draws }}D</p>
   </article>
 
   <article>
@@ -40,8 +41,10 @@
     {% if matchups %}
       <p>
         Sort:
-        <button onclick="sortMatchups('best')"><strong>Best</strong></button>
-        <button onclick="sortMatchups('worst')">Worst</button>
+        <span id="matchup-sort-buttons">
+          <button onclick="sortMatchups('best')">Best</button>
+          <button onclick="sortMatchups('worst')">Worst</button>
+        </span>
       </p>
       <table id="matchups-table">
         <thead><tr><th>Opponent archetype</th><th>Record</th></tr></thead>
@@ -50,23 +53,12 @@
           {% set total = m['wins'] + m['losses'] + m.get('draws', 0) %}
           <tr data-winrate="{{ (m['wins'] / total) if total > 0 else 0.5 }}">
             <td><a href="/archetypes/{{ m['opponent_id'] }}">{{ m['opponent_name'] }}</a></td>
-            <td>{{ m['wins'] }}W &ndash; {{ m['losses'] }}L{% if m['draws'] %} &ndash; {{ m['draws'] }}D{% endif %}</td>
+            <td>{{ m['wins'] }}W - {{ m['losses'] }}L{% if m['draws'] %} - {{ m['draws'] }}D{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
-      <script>
-        function sortMatchups(mode) {
-          const tbody = document.querySelector('#matchups-table tbody');
-          const rows = Array.from(tbody.querySelectorAll('tr'));
-          rows.sort((a, b) => {
-            const diff = parseFloat(b.dataset.winrate) - parseFloat(a.dataset.winrate);
-            return mode === 'worst' ? -diff : diff;
-          });
-          rows.forEach(r => tbody.appendChild(r));
-        }
-        sortMatchups('best');
-      </script>
+      <p id="matchup-pagination"></p>
     {% else %}
       <p>No matchup data recorded yet.</p>
     {% endif %}
@@ -82,7 +74,7 @@
           {% for p in top_players %}
           <tr>
             <td><a href="/players/{{ p['id'] }}">{{ p['name'] }}</a></td>
-            <td>{{ p['wins'] }}W &ndash; {{ p['losses'] }}L &ndash; {{ p['draws'] }}D</td>
+            <td>{{ p['wins'] }}W - {{ p['losses'] }}L - {{ p['draws'] }}D</td>
             <td>{{ "%.3f"|format(p['score']) }}</td>
           </tr>
           {% endfor %}
@@ -98,9 +90,11 @@
     {% if recent_results %}
       <p>
         Sort:
-        <button onclick="sortResults('date')"><strong>Date</strong></button>
-        <button onclick="sortResults('player')">Player</button>
-        <button onclick="sortResults('record')">Record</button>
+        <span id="results-sort-buttons">
+          <button onclick="sortResults('date')">Date</button>
+          <button onclick="sortResults('player')">Player</button>
+          <button onclick="sortResults('record')">Record</button>
+        </span>
       </p>
       <table id="recent-results-table">
         <thead><tr><th>Tournament</th><th>Date</th><th>Player</th><th>Rank</th><th>Record</th></tr></thead>
@@ -111,38 +105,14 @@
             <td>{{ r['played_on'] }}</td>
             <td><a href="/players/{{ r['player_id'] }}">{{ r['player_name'] }}</a></td>
             <td>{{ r['final_rank'] }}</td>
-            <td>{{ r['wins'] }}W &ndash; {{ r['losses'] }}L &ndash; {{ r['draws'] }}D
+            <td>{{ r['wins'] }}W - {{ r['losses'] }}L - {{ r['draws'] }}D
                 {% if r['moxfield_url'] %}(<a href="{{ r['moxfield_url'] }}" target="_blank">list</a>)
                 {% else %}(no list available){% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
-      <script>
-        function sortResults(mode) {
-          const tbody = document.querySelector('#recent-results-table tbody');
-          const rows = Array.from(tbody.querySelectorAll('tr'));
-          rows.sort((a, b) => {
-            if (mode === 'player') return a.dataset.player.localeCompare(b.dataset.player);
-            if (mode === 'record') {
-              const diff = parseInt(b.dataset.wins) - parseInt(a.dataset.wins);
-              return diff !== 0 ? diff : parseInt(a.dataset.losses) - parseInt(b.dataset.losses);
-            }
-            return b.dataset.date.localeCompare(a.dataset.date); // date desc default
-          });
-          rows.forEach(r => tbody.appendChild(r));
-        }
-      </script>
-      <nav>
-        <ul>
-          {% if page > 1 %}
-            <li><a href="/archetypes/{{ archetype['id'] }}?page={{ page - 1 }}">&laquo; Newer</a></li>
-          {% endif %}
-          {% if has_more_results %}
-            <li><a href="/archetypes/{{ archetype['id'] }}?page={{ page + 1 }}">Older &raquo;</a></li>
-          {% endif %}
-        </ul>
-      </nav>
+      <p id="results-pagination"></p>
     {% else %}
       <p>No results recorded yet.</p>
     {% endif %}
@@ -177,4 +147,89 @@
       <p>No card data for this window.</p>
     {% endif %}
   </article>
+
+  <script>
+    function updateActiveButton(containerId, clickedBtn) {
+      document.querySelectorAll('#' + containerId + ' button').forEach(b => {
+        b.style.fontWeight = b === clickedBtn ? 'bold' : 'normal';
+      });
+    }
+
+    const MATCHUP_PAGE_SIZE = 10;
+    let matchupPage = 0;
+    let matchupSort = 'best';
+
+    function renderMatchups() {
+      const tbody = document.querySelector('#matchups-table tbody');
+      if (!tbody) return;
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      rows.sort((a, b) => {
+        const diff = parseFloat(b.dataset.winrate) - parseFloat(a.dataset.winrate);
+        return matchupSort === 'worst' ? -diff : diff;
+      });
+      rows.forEach(r => tbody.appendChild(r));
+      const start = matchupPage * MATCHUP_PAGE_SIZE;
+      const end = start + MATCHUP_PAGE_SIZE;
+      rows.forEach((r, i) => r.style.display = (i >= start && i < end) ? '' : 'none');
+      const pag = document.getElementById('matchup-pagination');
+      const totalPages = Math.ceil(rows.length / MATCHUP_PAGE_SIZE);
+      if (totalPages <= 1) { pag.innerHTML = ''; return; }
+      let html = '';
+      if (matchupPage > 0) html += '<a href="#" onclick="goMatchupPage(' + (matchupPage - 1) + '); return false;">&laquo; Prev</a> ';
+      html += 'Page ' + (matchupPage + 1) + ' of ' + totalPages;
+      if (matchupPage < totalPages - 1) html += ' <a href="#" onclick="goMatchupPage(' + (matchupPage + 1) + '); return false;">Next &raquo;</a>';
+      pag.innerHTML = html;
+    }
+    function sortMatchups(mode) {
+      matchupSort = mode;
+      matchupPage = 0;
+      updateActiveButton('matchup-sort-buttons', event.target);
+      renderMatchups();
+    }
+    function goMatchupPage(p) { matchupPage = p; renderMatchups(); }
+
+    const RESULTS_PAGE_SIZE = 10;
+    let resultsPage = 0;
+    let resultsSort = 'date';
+
+    function renderResults() {
+      const tbody = document.querySelector('#recent-results-table tbody');
+      if (!tbody) return;
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      rows.sort((a, b) => {
+        if (resultsSort === 'player') return a.dataset.player.localeCompare(b.dataset.player);
+        if (resultsSort === 'record') {
+          const diff = parseInt(b.dataset.wins) - parseInt(a.dataset.wins);
+          return diff !== 0 ? diff : parseInt(a.dataset.losses) - parseInt(b.dataset.losses);
+        }
+        return b.dataset.date.localeCompare(a.dataset.date);
+      });
+      rows.forEach(r => tbody.appendChild(r));
+      const start = resultsPage * RESULTS_PAGE_SIZE;
+      const end = start + RESULTS_PAGE_SIZE;
+      rows.forEach((r, i) => r.style.display = (i >= start && i < end) ? '' : 'none');
+      const pag = document.getElementById('results-pagination');
+      const totalPages = Math.ceil(rows.length / RESULTS_PAGE_SIZE);
+      if (totalPages <= 1) { pag.innerHTML = ''; return; }
+      let html = '';
+      if (resultsPage > 0) html += '<a href="#" onclick="goResultsPage(' + (resultsPage - 1) + '); return false;">&laquo; Prev</a> ';
+      html += 'Page ' + (resultsPage + 1) + ' of ' + totalPages;
+      if (resultsPage < totalPages - 1) html += ' <a href="#" onclick="goResultsPage(' + (resultsPage + 1) + '); return false;">Next &raquo;</a>';
+      pag.innerHTML = html;
+    }
+    function sortResults(mode) {
+      resultsSort = mode;
+      resultsPage = 0;
+      updateActiveButton('results-sort-buttons', event.target);
+      renderResults();
+    }
+    function goResultsPage(p) { resultsPage = p; renderResults(); }
+
+    const mBtn = document.querySelector('#matchup-sort-buttons button');
+    if (mBtn) mBtn.style.fontWeight = 'bold';
+    const rBtn = document.querySelector('#results-sort-buttons button');
+    if (rBtn) rBtn.style.fontWeight = 'bold';
+    renderMatchups();
+    renderResults();
+  </script>
 {% endblock %}

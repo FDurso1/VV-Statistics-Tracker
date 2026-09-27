@@ -28,6 +28,9 @@ from app.formatting import clean_deck_name
 from app.keyword_matching import parse_keyword_groups, generate_all_search_aliases
 from app.db_archive import ensure_db_extracted
 
+from datetime import date, timedelta
+from app.constants import BASIC_LAND_NAMES
+
 # Type aliases
 FetchFn = Callable[[str], dict[str, Any]]
 ConfirmFn = Callable[[list[str]], bool]
@@ -45,7 +48,7 @@ PLAYERS_SHEET_COLUMNS: list[str] = [
     "bio", "is_public", "aliases",
 ]
 ARCHETYPES_SHEET_COLUMNS: list[str] = [
-    "Primary Colors", "Primary Archetype", "Variant Of", "Style",
+    "Primary Colors", "Archetype Name", "Search Keywords", "Style",
 ]
 
 SheetTuple = tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
@@ -127,7 +130,7 @@ def find_unknown_players( games_df: pd.DataFrame, standings_df: pd.DataFrame, pl
 
 def find_unknown_archetypes(standings_df: pd.DataFrame, archetypes_df: pd.DataFrame,) -> list[str]:
 
-    known: set[str] = {str(n).strip() for n in archetypes_df["Primary Archetype"] if str(n).strip()}
+    known: set[str] = {str(n).strip() for n in archetypes_df["Archetype Name"] if str(n).strip()}
     referenced: set[str] = set()
     if "archetype" in standings_df.columns:
         referenced |= {str(n).strip() for n in standings_df["archetype"] if str(n).strip()}
@@ -259,17 +262,17 @@ def insert_archetypes_sheet(
 
     archetype_cache: ArchetypeCache = {}
     for _, row in archetypes_df.iterrows():
-        name: str = str(row["Primary Archetype"]).strip()
+        name: str = str(row["Archetype Name"]).strip()
         if not name:
             continue
         unclaimable: int = 1 if _is_truthy(row.get("Unclaimable", "")) else 0
         cur: sqlite3.Cursor = conn.execute(
-            "INSERT INTO archetypes (name, primary_colors, variant_of, style, unclaimable) "
+            "INSERT INTO archetypes (name, primary_colors, search_keywords, style, unclaimable) "
             "VALUES (?, ?, ?, ?, ?)",
             (
                 name,
                 str(row.get("Primary Colors", "")).strip() or None,
-                str(row.get("Variant Of", "")).strip() or None,
+                str(row.get("Search Keywords", "")).strip() or None,
                 str(row.get("Style", "")).strip() or None,
                 unclaimable,
             ),
@@ -303,6 +306,89 @@ def insert_archetype_search_aliases(
                     f"KeywordMaps, which is also the name of a different existing "
                     f"archetype -- these may need to be merged into one."
                 )
+
+def _compute_deck_snapshot_price(
+    conn: sqlite3.Connection, tournament_date: str,
+    deck_cards: dict[str, Any],
+) -> float | None:
+    """Compute the total price of a deck as of tournament_date.
+    Basics count as $0. Returns None if any non-basic card is missing
+    a price for that exact date. Raises RuntimeError if the tournament
+    is today but no prices have been fetched today yet."""
+    today_str: str = date.today().isoformat()
+    if tournament_date == today_str:
+        row: Any = conn.execute(
+            "SELECT COUNT(*) FROM card_price_cache WHERE price_date = ?",
+            (today_str,),
+        ).fetchone()
+        if row[0] == 0:
+            raise RuntimeError(
+                f"Tournament date is today ({today_str}) but no prices "
+                f"have been fetched for today yet. Run "
+                f"'python scripts/update_prices.py' before building."
+            )
+ 
+    total: float = 0.0
+    for name, info in deck_cards.items():
+        if name in BASIC_LAND_NAMES:
+            continue
+        qty: int = int(info["quantity"])
+        row = conn.execute(
+            "SELECT price FROM card_price_cache "
+            "WHERE card_name = ? AND price_date = ?",
+            (name, tournament_date),
+        ).fetchone()
+        if row is None:
+            return None  # incomplete pricing, skip this deck
+        total += float(row["price"]) * qty
+    return total
+ 
+ 
+def _maybe_snapshot_deck_price(
+    conn: sqlite3.Connection, moxfield_url: str, tournament_id: str,
+    tournament_date: str, deck_cards: dict[str, Any],
+    warnings: list[str],
+) -> None:
+    """Compute and store a deck price snapshot if the tournament is
+    within 30 days AND every non-basic card in the deck has price data
+    for the exact tournament date. Silently skips otherwise."""
+    cutoff: str = (date.today() - timedelta(days=30)).isoformat()
+    if tournament_date < cutoff:
+        return  # too old, don't bother
+ 
+    deck_id_str: str = extract_deck_id(moxfield_url)
+    if not deck_id_str:
+        return
+ 
+    # Idempotent: skip if we already have a snapshot for this deck
+    existing: Any = conn.execute(
+        "SELECT 1 FROM deck_price_snapshots WHERE moxfield_deck_id = ?",
+        (deck_id_str,),
+    ).fetchone()
+    if existing:
+        return
+ 
+    try:
+        total_price: float | None = _compute_deck_snapshot_price(
+            conn, tournament_date, deck_cards,
+        )
+    except RuntimeError as e:
+        # Fail loud for today's tournaments with missing prices
+        raise RuntimeError(
+            f"Tournament '{tournament_id}': {e}"
+        ) from e
+ 
+    if total_price is None:
+        return  # incomplete price data, skip silently
+ 
+    conn.execute(
+        "INSERT OR IGNORE INTO deck_price_snapshots "
+        "(moxfield_deck_id, tournament_id, played_on, total_price) "
+        "VALUES (?, ?, ?, ?)",
+        (deck_id_str, tournament_id, tournament_date, total_price),
+    )
+
+
 
 def get_or_create_deck(
     conn: sqlite3.Connection, url: Any, archetype_name: Any,
@@ -464,6 +550,7 @@ def _build_from_dataframes(
             sys.exit(1)
 
     conn: sqlite3.Connection = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     rebuild_schema(conn)
 
     warnings: list[str] = []
@@ -559,6 +646,19 @@ def _build_from_dataframes(
             "final_rank, wins, losses, draws) VALUES (?,?,?,?,?,?,?)",
             (tid, p_id, deck_id, int(row["final_rank"]), wins, losses, draws),
         )
+        if row["deck_url"] and row["deck_url"].strip():
+            # Read cards back from the snapshot file that get_or_create_deck saved
+            deck_id_str = extract_deck_id(str(row["deck_url"]).strip())
+            snap_file = snapshot_dir / f"{deck_id_str}.json"
+            if snap_file.exists():
+                snap_data = json.loads(snap_file.read_text())
+                if "boards" in snap_data:
+                    snap_cards = extract_cards_from_snapshot(snap_data)
+                    _maybe_snapshot_deck_price(
+                        conn, str(row["deck_url"]).strip(), tid,
+                        played_on, snap_cards, warnings,
+                    )
+
 
     conn.commit()
     conn.close()

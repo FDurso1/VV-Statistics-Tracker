@@ -90,13 +90,11 @@ def _is_tournament_legal_printing(card: dict[str, Any]) -> bool:
         return False
     if "paper" not in (card.get("games") or []):
         return False
-    if card.get("set") == "sum":
+    if card.get("set") == "sum": # remove Summer printings. Some illegal prices may slip through, but most shouldn't
         return False
     return True
 
-def _cheapest_prices_from_bulk(
-    name_filter: set[str] | None = None,
-) -> dict[str, float]:
+def _cheapest_prices_from_bulk(name_filter: set[str] | None = None) -> dict[str, float]:
 
     download_uri: str = _get_default_cards_download_uri()
     cheapest: dict[str, float] = {}
@@ -126,9 +124,7 @@ def _cheapest_prices_from_bulk(
 
     return cheapest
 
-def cheapest_vintage_legal_prices(
-    card_names: set[str],
-) -> dict[str, float | None]:
+def cheapest_vintage_legal_prices(card_names: set[str]) -> dict[str, float | None]:
 
     wanted: set[str] = set(card_names)
     cheapest: dict[str, float] = _cheapest_prices_from_bulk(name_filter=wanted)

@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block content %}
   <h1>Deck Visualizer</h1>
@@ -28,6 +29,28 @@
         (mainboard ${{ "%.2f"|format(data.mainboard_total) }} + sideboard ${{ "%.2f"|format(data.sideboard_total) }})
       </article>
     {% endif %}
+
+    {% if price_snapshot %}
+      <article style="margin-top: 1rem;">
+        <h3>Historical price</h3>
+        <p>
+          When played in
+          <a href="/tournaments/{{ price_snapshot.tournament_id }}">{{ price_snapshot.tournament_name }}</a>
+          {% if price_snapshot.player_id %}
+            by <a href="/players/{{ price_snapshot.player_id }}">{{ price_snapshot.player_name }}</a>
+          {% endif %}
+          on {{ price_snapshot.played_on }}:
+          <strong>${{ "%.2f"|format(price_snapshot.total_price) }}</strong>
+        </p>
+        {% if price_snapshot.total_price > 30 %}
+          <p style="font-size: 0.85em; color: #666;">
+            <em>Note: this event may have had an open submission window,
+            resulting in its price being over $30 when played but
+            legal upon its entry.</em>
+          </p>
+        {% endif %}
+      </article>
+    {% endif %}
     {% if data.missing_data_count > 0 %}
       <p><em>{{ data.missing_data_count }} card(s) have no price data yet -- the total above may be incomplete.</em></p>
     {% endif %}
@@ -52,7 +75,7 @@
 
     <label>
       <input type="checkbox" id="show-cheap-toggle">
-      Show cards under $0.30 (hidden by default)
+      Show cards under $0.30
     </label>
 
     <div style="display: flex; gap: 1rem; align-items: flex-start;">

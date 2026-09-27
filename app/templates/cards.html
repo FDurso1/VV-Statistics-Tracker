@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block content %}
   <h1>Cards</h1>
@@ -31,7 +32,7 @@
             {% for card in top_cards %}
               <tr>
                 <td><a href="/cards/{{ card['name'] | urlencode }}">{{ card['name'] }}</a></td>
-                <td>{{ card['deck_count'] }}</td>
+                <td>{{ card['deck_count'] }} across {{ card['archetype_count'] }} archetype{{ 's' if card['archetype_count'] != 1 else '' }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -40,5 +41,207 @@
         <p>No tournament data yet.</p>
       {% endif %}
     </article>
+
+    <article>
+      <h2>All cards</h2>
+
+      <div style="margin-bottom: 0.5rem;">
+        Sort:
+        <span id="sort-buttons">
+          <button onclick="setSort('alpha')">A-Z</button>
+          <button onclick="setSort('price')">Price</button>
+          <button onclick="setSort('winrate')">Win rate</button>
+          <button onclick="setSort('adjusted')">Adj. score</button>
+          <button onclick="setSort('playrate')">Play rate</button>
+          <button onclick="setSort('appearances')">Appearances</button>
+          <button onclick="setSort('prevalence')">Prevalence</button>
+          <button onclick="setSort('newest')">Newest</button>
+        </span>
+        &middot;
+        <span id="time-buttons">
+          <button onclick="setRecent(false)">All time</button>
+          <button onclick="setRecent(true)">Last 30 days</button>
+        </span>
+      </div>
+
+      <div style="margin-bottom: 0.5rem;">
+        Show columns:
+        <label><input type="checkbox" id="col-price" onchange="render()"> Price</label>
+        <label><input type="checkbox" id="col-record" onchange="render()"> Record + Score</label>
+        <label><input type="checkbox" id="col-adjusted" onchange="render()"> Adj. score</label>
+        <label><input type="checkbox" id="col-copies" onchange="render()"> Total copies</label>
+        <label><input type="checkbox" id="col-decks" onchange="render()"> Decks</label>
+        <label><input type="checkbox" id="col-archetypes" onchange="render()"> Archetypes</label>
+        <label><input type="checkbox" id="col-firstseen" onchange="render()"> First seen</label>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label><input type="checkbox" id="include-basics" onchange="applyFilters()"> Include basic lands</label>
+        &middot;
+        <label><input type="checkbox" id="exclude-banned" onchange="applyFilters()"> Exclude banned archetype contributions</label>
+        &middot;
+        Min. entries: <input type="number" id="filter-min-entries" min="0" value="0" style="width: 120px;" oninput="applyFilters()">
+      </div>
+
+      <table>
+        <thead id="cards-head"></thead>
+        <tbody id="cards-body"></tbody>
+      </table>
+      <p id="cards-pagination"></p>
+    </article>
+
+    <script>
+      const alltimeWithData = {{ alltime_with_json | safe }};
+      const alltimeNoData = {{ alltime_no_json | safe }};
+      const recentWithData = {{ recent_with_json | safe }};
+      const recentNoData = {{ recent_no_json | safe }};
+      let currentSort = 'alpha';
+      let useRecent = false;
+      let currentPage = 0;
+      const PAGE_SIZE = 20;
+
+      const SORT_TO_COLUMN = {
+        price: 'col-price',
+        winrate: 'col-record',
+        adjusted: 'col-adjusted',
+        playrate: 'col-copies',
+        appearances: 'col-decks',
+        prevalence: 'col-archetypes',
+        newest: 'col-firstseen',
+      };
+
+      function getDataset() {
+        const excludeBanned = document.getElementById('exclude-banned').checked;
+        if (useRecent) return excludeBanned ? recentNoData : recentWithData;
+        return excludeBanned ? alltimeNoData : alltimeWithData;
+      }
+
+      function getFiltered() {
+        const data = getDataset();
+        const includeBasics = document.getElementById('include-basics').checked;
+        const minEntries = parseInt(document.getElementById('filter-min-entries').value) || 0;
+        return data.filter(c => {
+          if (!includeBasics && c.is_basic) return false;
+          if (c.wins + c.losses + c.draws < minEntries) return false;
+          return true;
+        });
+      }
+
+      function getSorted() {
+        const data = getFiltered();
+        const sorted = [...data];
+        if (currentSort === 'price') {
+          sorted.sort((a, b) => (b.current_price ?? -1) - (a.current_price ?? -1));
+        } else if (currentSort === 'winrate') {
+          sorted.sort((a, b) => b.score - a.score);
+        } else if (currentSort === 'adjusted') {
+          sorted.sort((a, b) => b.adjusted_score - a.adjusted_score);
+        } else if (currentSort === 'playrate') {
+          sorted.sort((a, b) => b.total_copies - a.total_copies);
+        } else if (currentSort === 'appearances') {
+          sorted.sort((a, b) => b.deck_count - a.deck_count);
+        } else if (currentSort === 'prevalence') {
+          sorted.sort((a, b) => b.archetype_count - a.archetype_count);
+        } else if (currentSort === 'newest') {
+          sorted.sort((a, b) => (b.first_seen_date || '').localeCompare(a.first_seen_date || ''));
+        } else {
+          sorted.sort((a, b) => a.name.localeCompare(b.name));
+        }
+        return sorted;
+      }
+
+      function visibleColumns() {
+        return {
+          price: document.getElementById('col-price').checked,
+          record: document.getElementById('col-record').checked,
+          adjusted: document.getElementById('col-adjusted').checked,
+          copies: document.getElementById('col-copies').checked,
+          decks: document.getElementById('col-decks').checked,
+          archetypes: document.getElementById('col-archetypes').checked,
+          firstseen: document.getElementById('col-firstseen').checked,
+        };
+      }
+
+      function renderHeader(cols) {
+        const head = document.getElementById('cards-head');
+        let html = '<tr><th>Card</th>';
+        if (cols.price) html += '<th>Price</th>';
+        if (cols.record) html += '<th>Record</th><th>Score</th>';
+        if (cols.adjusted) html += '<th>Adj. score</th>';
+        if (cols.copies) html += '<th>Total copies</th>';
+        if (cols.decks) html += '<th>Decks</th>';
+        if (cols.archetypes) html += '<th>Archetypes</th>';
+        if (cols.firstseen) html += '<th>First seen</th>';
+        html += '</tr>';
+        head.innerHTML = html;
+      }
+
+      function fmtPrice(p) {
+        return p == null ? '—' : '$' + p.toFixed(2);
+      }
+
+      function render() {
+        const cols = visibleColumns();
+        renderHeader(cols);
+        const sorted = getSorted();
+        const start = currentPage * PAGE_SIZE;
+        const page = sorted.slice(start, start + PAGE_SIZE);
+        const tbody = document.getElementById('cards-body');
+        tbody.innerHTML = '';
+        const totalCols = 1 + (cols.price?1:0) + (cols.record?2:0) + (cols.adjusted?1:0)
+                            + (cols.copies?1:0) + (cols.decks?1:0)
+                            + (cols.archetypes?1:0) + (cols.firstseen?1:0);
+        if (page.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="' + totalCols + '"><em>No cards match.</em></td></tr>';
+        }
+        page.forEach(c => {
+          let row = '<tr><td><a href="/cards/' + encodeURIComponent(c.name) + '">' + c.name + '</a></td>';
+          if (cols.price) row += '<td>' + fmtPrice(c.current_price) + '</td>';
+          if (cols.record) row += '<td>' + c.wins + 'W-' + c.losses + 'L-' + c.draws + 'D</td><td>' + c.score.toFixed(3) + '</td>';
+          if (cols.adjusted) row += '<td>' + c.adjusted_score.toFixed(3) + '</td>';
+          if (cols.copies) row += '<td>' + c.total_copies + '</td>';
+          if (cols.decks) row += '<td>' + c.deck_count + '</td>';
+          if (cols.archetypes) row += '<td>' + c.archetype_count + '</td>';
+          if (cols.firstseen) row += '<td>' + c.first_seen_date + '</td>';
+          row += '</tr>';
+          tbody.insertAdjacentHTML('beforeend', row);
+        });
+
+        const pag = document.getElementById('cards-pagination');
+        const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+        if (totalPages <= 1) { pag.innerHTML = ''; return; }
+        let html = '';
+        if (currentPage > 0) html += '<a href="#" onclick="goPage(' + (currentPage - 1) + '); return false;">&laquo; Prev</a> ';
+        html += 'Page ' + (currentPage + 1) + ' of ' + totalPages;
+        if (currentPage < totalPages - 1) html += ' <a href="#" onclick="goPage(' + (currentPage + 1) + '); return false;">Next &raquo;</a>';
+        pag.innerHTML = html;
+      }
+
+      function updateActiveButton(containerId, clickedBtn) {
+        document.querySelectorAll('#' + containerId + ' button').forEach(b => {
+          b.style.fontWeight = b === clickedBtn ? 'bold' : 'normal';
+        });
+      }
+
+      function setSort(s) {
+        currentSort = s;
+        currentPage = 0;
+        updateActiveButton('sort-buttons', event.target);
+        const colId = SORT_TO_COLUMN[s];
+        if (colId) document.getElementById(colId).checked = true;
+        render();
+      }
+      function setRecent(r) {
+        useRecent = r; currentPage = 0;
+        updateActiveButton('time-buttons', event.target);
+        render();
+      }
+      function goPage(p) { currentPage = p; render(); }
+      function applyFilters() { currentPage = 0; render(); }
+
+      document.querySelector('#sort-buttons button').style.fontWeight = 'bold';
+      document.querySelector('#time-buttons button').style.fontWeight = 'bold';
+      render();
+    </script>
   {% endif %}
 {% endblock %}

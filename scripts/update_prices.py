@@ -7,9 +7,9 @@ from typing import Callable
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from app.scryfall import all_vintage_legal_prices 
-from app.constants import BASIC_LAND_NAMES
-from app.db_archive import ensure_db_extracted 
+from app.scryfall import all_vintage_legal_prices  # noqa: E402
+from app.constants import BASIC_LAND_NAMES  # noqa: E402
+from app.db_archive import ensure_db_extracted  # noqa: E402
 
 DB_PATH = ROOT / "data" / "mtg_data.db"
 RETENTION_DAYS = 30

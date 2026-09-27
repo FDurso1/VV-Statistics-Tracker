@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block content %}
   <h1>Archetypes</h1>
@@ -7,88 +8,194 @@
     <button type="submit">Search</button>
   </form>
 
-  <form method="get" action="/archetypes">
-    <label>Colors: <input type="text" name="colors" value="{{ colors }}" placeholder="e.g. RW" maxlength="5"></label>
-    <select name="color_mode">
-      <option value="at_least" {% if color_mode == "at_least" %}selected{% endif %}>At least</option>
-      <option value="at_most" {% if color_mode == "at_most" %}selected{% endif %}>At most</option>
-      <option value="exactly" {% if color_mode == "exactly" %}selected{% endif %}>Exactly</option>
-    </select>
-    <label>Style:
-      <select name="style">
-        <option value="">Any</option>
-        {% for s in ["Combo", "Aggro", "Midrange", "Control", "Prison"] %}
-          <option value="{{ s }}" {% if style == s %}selected{% endif %}>{{ s }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit">Filter</button>
-  </form>
-
   <p><a href="/archetypes/random">Random archetype</a></p>
 
-  {% if query and not archetypes %}
-    <p>No archetypes matched "{{ query }}".</p>
-  {% endif %}
-
-  <table>
-    <thead><tr><th>Archetype</th><th>Colors</th><th>Style</th></tr></thead>
-    <tbody>
-      {% for archetype in archetypes %}
-        <tr>
-          <td><a href="/archetypes/{{ archetype['id'] }}">{{ archetype['name'] }}</a></td>
-          <td>{{ archetype['primary_colors'] or '' }}</td>
-          <td>{{ archetype['style'] or '' }}</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-
-  {% if undefeated is not none %}
-  <div class="grid">
-    <article>
-      <h2>Recently undefeated</h2>
-      {% if undefeated %}
-        <ul>
-          {% for p in undefeated %}
-            <li>
-              <a href="/archetypes/{{ p['archetype_id'] }}">{{ p['archetype_name'] }}</a>
-              &mdash; <a href="/players/{{ p['player_id'] }}">{{ p['player_name'] }}</a>
-              (<a href="/tournaments/{{ p['tournament_id'] }}">tournament</a>{% if p['moxfield_url'] %},
-               <a href="{{ p['moxfield_url'] }}" target="_blank">list</a>{% endif %})
-            </li>
+  {% if query %}
+    {% if not archetypes %}
+      <p>No archetypes matched "{{ query }}".</p>
+    {% else %}
+      <table>
+        <thead><tr><th>Archetype</th><th>Colors</th><th>Style</th></tr></thead>
+        <tbody>
+          {% for a in archetypes %}
+          <tr>
+            <td><a href="/archetypes/{{ a['id'] }}">{{ a['name'] }}</a></td>
+            <td>{{ a['primary_colors'] or '' }}</td>
+            <td>{{ a['style'] or '' }}</td>
+          </tr>
           {% endfor %}
-        </ul>
-      {% else %}
-        <p>No undefeated runs recorded yet.</p>
-      {% endif %}
-    </article>
+        </tbody>
+      </table>
+    {% endif %}
+  {% else %}
+    <div style="display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+      <article style="flex: 1; min-width: 200px;">
+        <h3>Recently undefeated</h3>
+        {% if undefeated %}
+          <ul>
+            {% for p in undefeated %}
+              <li>
+                <a href="/archetypes/{{ p['archetype_id'] }}">{{ p['archetype_name'] }}</a>
+                - <a href="/players/{{ p['player_id'] }}">{{ p['player_name'] }}</a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p><em>None yet.</em></p>
+        {% endif %}
+      </article>
+      <article style="flex: 1; min-width: 200px;" id="sidebar-most-played">
+        <h3>Most played</h3>
+        <ol id="sidebar-mp-list"></ol>
+      </article>
+      <article style="flex: 1; min-width: 200px;" id="sidebar-top-winrate">
+        <h3>Top winrate</h3>
+        <ol id="sidebar-wr-list"></ol>
+      </article>
+    </div>
 
-    <article>
-      <h2>Most played</h2>
-      {% if most_played %}
-        <ol>
-          {% for a in most_played %}
-            <li><a href="/archetypes/{{ a['id'] }}">{{ a['name'] }}</a> ({{ a['deck_count'] }} decks)</li>
-          {% endfor %}
-        </ol>
-      {% else %}
-        <p>No archetypes recorded yet.</p>
-      {% endif %}
-    </article>
+    <div style="margin-bottom: 1rem;">
+      <p>
+        Sort:
+        <span id="sort-buttons">
+          <button onclick="setSort('alpha')" class="active">A–Z</button>
+          <button onclick="setSort('winrate')">Win rate</button>
+          <button onclick="setSort('playrate')">Play rate</button>
+          <button onclick="setSort('newest')">Newest</button>
+          <button onclick="setSort('recent')">Recently played</button>
+        </span>
+        &middot;
+        <span id="time-buttons">
+          <button onclick="setRecent(false)" class="active">All time</button>
+          <button onclick="setRecent(true)">Last 3 months</button>
+        </span>
+      </p>
+      <p>
+        Filter --
+        Colors: <input type="text" id="filter-colors" placeholder="e.g. WR" maxlength="5" oninput="applyFilters()" style="width: 150px;">
+        <select id="filter-color-mode" onchange="applyFilters()">
+          <option value="at_least">At least</option>
+          <option value="at_most">At most</option>
+          <option value="exactly">Exactly</option>
+        </select>
+        Style: <select id="filter-style" onchange="applyFilters()">
+          <option value="">Any</option>
+          <option>Combo</option><option>Aggro</option><option>Midrange</option>
+          <option>Control</option><option>Prison</option>
+        </select>
+        Min. entries: <input type="number" id="filter-min-entries" min="0" value="0" style="width: 100px;" oninput="applyFilters()">
+      </p>
+    </div>
 
-    <article>
-      <h2>Top winrate</h2>
-      {% if top_winrate %}
-        <ol>
-          {% for a in top_winrate %}
-            <li><a href="/archetypes/{{ a['id'] }}">{{ a['name'] }}</a> ({{ "%.3f"|format(a['score']) }})</li>
-          {% endfor %}
-        </ol>
-      {% else %}
-        <p>No archetypes recorded yet.</p>
-      {% endif %}
-    </article>
-  </div>
+    <table>
+      <thead><tr><th>Archetype</th><th>Colors</th><th>Style</th><th>Record</th><th>Decks</th><th>Score</th></tr></thead>
+      <tbody id="arch-body"></tbody>
+    </table>
+    <p id="arch-pagination"></p>
+
+    <script>
+      const allData = {{ alltime_json | safe }};
+      const recentData = {{ recent_json | safe }};
+      let currentSort = 'alpha';
+      let useRecent = false;
+      let currentPage = 0;
+      const PAGE_SIZE = 20;
+
+      function getDataset() { return useRecent ? recentData : allData; }
+
+      function matchesColorFilter(colors, selected, mode) {
+        if (!selected) return true;
+        const cs = new Set(colors.toUpperCase());
+        const ss = new Set(selected.toUpperCase());
+        if (mode === 'exactly') return cs.size === ss.size && [...ss].every(c => cs.has(c));
+        if (mode === 'at_most') return [...cs].every(c => ss.has(c));
+        return [...ss].every(c => cs.has(c)); // at_least
+      }
+
+      function getFiltered() {
+        const data = getDataset();
+        const colors = document.getElementById('filter-colors').value.trim();
+        const colorMode = document.getElementById('filter-color-mode').value;
+        const style = document.getElementById('filter-style').value;
+        const minEntries = parseInt(document.getElementById('filter-min-entries').value) || 0;
+        return data.filter(a => {
+          if (colors && !matchesColorFilter(a.colors, colors, colorMode)) return false;
+          if (style && !(a.style || '').split(';').map(s => s.trim()).includes(style)) return false;
+          if (a.wins + a.losses + a.draws < minEntries) return false;
+          return true;
+        });
+      }
+
+      function getSorted() {
+        const data = getFiltered();
+        const sorted = [...data];
+        if (currentSort === 'winrate') sorted.sort((a, b) => b.score - a.score);
+        else if (currentSort === 'playrate') sorted.sort((a, b) => b.deck_count - a.deck_count);
+        else if (currentSort === 'newest') sorted.sort((a, b) => (b.pioneered_date || '').localeCompare(a.pioneered_date || ''));
+        else if (currentSort === 'recent') sorted.sort((a, b) => (b.newest_date || '').localeCompare(a.newest_date || ''));
+        else sorted.sort((a, b) => a.name.localeCompare(b.name));
+        return sorted;
+      }
+
+      function render() {
+        const sorted = getSorted();
+        const start = currentPage * PAGE_SIZE;
+        const page = sorted.slice(start, start + PAGE_SIZE);
+        const tbody = document.getElementById('arch-body');
+        tbody.innerHTML = '';
+        if (page.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6"><em>No archetypes match.</em></td></tr>';
+        }
+        page.forEach(a => {
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td><a href="/archetypes/' + a.id + '">' + a.name + '</a></td>' +
+            '<td>' + a.colors + '</td>' +
+            '<td>' + a.style + '</td>' +
+            '<td>' + a.wins + 'W–' + a.losses + 'L–' + a.draws + 'D</td>' +
+            '<td>' + a.deck_count + '</td>' +
+            '<td>' + a.score.toFixed(3) + '</td>';
+          tbody.appendChild(tr);
+        });
+
+        const pag = document.getElementById('arch-pagination');
+        const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+        if (totalPages <= 1) { pag.innerHTML = ''; return; }
+        let html = '';
+        if (currentPage > 0) html += '<a href="#" onclick="goPage(' + (currentPage - 1) + '); return false;">&laquo; Prev</a> ';
+        html += 'Page ' + (currentPage + 1) + ' of ' + totalPages;
+        if (currentPage < totalPages - 1) html += ' <a href="#" onclick="goPage(' + (currentPage + 1) + '); return false;">Next &raquo;</a>';
+        pag.innerHTML = html;
+
+        const top3mp = [...getFiltered()].sort((a, b) => b.deck_count - a.deck_count).slice(0, 3);
+        const top3wr = [...getFiltered()].sort((a, b) => b.score - a.score).slice(0, 3);
+        document.getElementById('sidebar-mp-list').innerHTML = top3mp
+          .map(a => '<li><a href="/archetypes/' + a.id + '">' + a.name + '</a> (' + a.deck_count + ' decks)</li>').join('');
+        document.getElementById('sidebar-wr-list').innerHTML = top3wr
+          .map(a => '<li><a href="/archetypes/' + a.id + '">' + a.name + '</a> (' + a.score.toFixed(3) + ')</li>').join('');
+      }
+
+      function updateActiveButton(containerId, clickedBtn) {
+        document.querySelectorAll('#' + containerId + ' button').forEach(b => {
+          b.style.fontWeight = b === clickedBtn ? 'bold' : 'normal';
+        });
+      }
+
+      function setSort(s) {
+        currentSort = s; currentPage = 0;
+        updateActiveButton('sort-buttons', event.target);
+        render();
+      }
+      function setRecent(r) {
+        useRecent = r; currentPage = 0;
+        updateActiveButton('time-buttons', event.target);
+        render();
+      }
+      
+      function goPage(p) { currentPage = p; render(); }
+      function applyFilters() { currentPage = 0; render(); }
+
+      render();
+    </script>
   {% endif %}
 {% endblock %}

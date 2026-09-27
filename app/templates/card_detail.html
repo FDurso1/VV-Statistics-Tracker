@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block content %}
   <h1>{{ card_name }}</h1>
@@ -18,12 +19,15 @@
          loading="lazy"
          onerror="this.style.display='none'">
   {% endif %}
-
+  <p>
+    {% if price_history %}Current price: <strong>${{ "%.2f"|format(price_history[-1]['price']) }}</strong> &middot; {% endif %}
+    <a href="https://scryfall.com/search?q=!&quot;{{ card_name }}&quot;&unique=cards" target="_blank">View on Scryfall</a>
+  </p>
   <article>
     <h2>Tournament stats</h2>
     {% set total = winrate.wins + winrate.losses %}
     {% if total > 0 %}
-      <p>{{ winrate.wins }}W &ndash; {{ winrate.losses }}L &ndash; {{ winrate.draws }}D
+      <p>{{ winrate.wins }}W - {{ winrate.losses }}L - {{ winrate.draws }}D
          ({{ "%.1f"|format(winrate.wins / total * 100) }}%)
          across decks that ran this card</p>
       <p><em>Bayesian score: {{ "%.3f"|format(winrate.score) }}</em></p>
@@ -71,22 +75,30 @@
             datasets: [{
               label: '{{ card_name }}',
               data: prices,
-              borderWidth: 2,
-              pointRadius: 2,
+              borderWidth: 1.5,
+              borderColor: 'rgb(54, 120, 209)',
+              pointRadius: 3,
               tension: 0.2,
               fill: false,
-            }]
+          }]
           },
           options: {
             responsive: true,
+            devicePixelRatio: window.devicePixelRatio || 2,
             interaction: { mode: 'index', intersect: false },
             scales: {
               y: {
-                beginAtZero: false,
-                ticks: { callback: v => '$' + v.toFixed(2) }
+                  beginAtZero: false,
+                  ticks: {
+                      callback: v => '$' + v.toFixed(2),
+                      font: { size: 14 }
+                  }
+              },
+              x: {
+                  ticks: { font: { size: 12 } }
               }
-            },
-            plugins: {
+           },
+           plugins: {
               tooltip: {
                 callbacks: {
                   label: ctx => '$' + ctx.parsed.y.toFixed(2)

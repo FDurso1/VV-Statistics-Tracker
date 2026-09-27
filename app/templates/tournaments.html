@@ -1,31 +1,25 @@
+
 {% extends "base.html" %}
 {% block content %}
   <h1>Tournaments</h1>
 
-  <form method="get" action="/tournaments">
-    <div class="grid">
-      <input type="search" name="q" value="{{ query }}" placeholder="Search a tournament name...">
-      <select name="format">
-        <option value="" {% if not format %}selected{% endif %}>Any format</option>
-        {% for f in ["MTGO", "Cockatrice", "Webcam", "Paper"] %}
-          <option value="{{ f }}" {% if format == f %}selected{% endif %}>{{ f }}</option>
-        {% endfor %}
-      </select>
-      <input type="date" name="date_from" value="{{ date_from }}">
-      <input type="date" name="date_to" value="{{ date_to }}">
-    </div>
-    <button type="submit">Filter</button>
-  </form>
+  <div class="grid">
+    <input type="search" id="filter-name" placeholder="Search a tournament name..." oninput="applyFilters()">
+    <select id="filter-format" onchange="applyFilters()">
+      <option value="">Any format</option>
+      {% for f in ["MTGO", "Cockatrice", "Webcam", "Paper", "Endstep"] %}
+        <option value="{{ f }}">{{ f }}</option>
+      {% endfor %}
+    </select>
+    <input type="date" id="filter-date-from" onchange="applyFilters()">
+    <input type="date" id="filter-date-to" onchange="applyFilters()">
+  </div>
 
-  {% if not tournaments %}
-    <p>No tournaments matched.</p>
-  {% endif %}
-
-  <table>
+  <table id="tournaments-table">
     <thead><tr><th>Name</th><th>Date</th><th>Format</th></tr></thead>
     <tbody>
       {% for t in tournaments %}
-        <tr>
+        <tr data-name="{{ t['name']|lower }}" data-date="{{ t['played_on'] }}" data-format="{{ t['format'] }}">
           <td><a href="/tournaments/{{ t['id'] }}">{{ t['name'] }}</a></td>
           <td>{{ t['played_on'] }}</td>
           <td>{{ t['format'] }}</td>
@@ -33,4 +27,52 @@
       {% endfor %}
     </tbody>
   </table>
+  <p id="tournaments-pagination"></p>
+  <p id="no-match-msg" style="display: none;"><em>No tournaments matched the filters.</em></p>
+
+  <script>
+    const TOURN_PAGE_SIZE = 10;
+    let tournPage = 0;
+
+    function renderTournaments() {
+      const tbody = document.querySelector('#tournaments-table tbody');
+      if (!tbody) return;
+      const nameQuery = document.getElementById('filter-name').value.trim().toLowerCase();
+      const formatFilter = document.getElementById('filter-format').value;
+      const dateFrom = document.getElementById('filter-date-from').value;
+      const dateTo = document.getElementById('filter-date-to').value;
+
+      const allRows = Array.from(tbody.querySelectorAll('tr'));
+      const matching = allRows.filter(r => {
+        if (nameQuery && !r.dataset.name.includes(nameQuery)) return false;
+        if (formatFilter && r.dataset.format !== formatFilter) return false;
+        if (dateFrom && r.dataset.date < dateFrom) return false;
+        if (dateTo && r.dataset.date > dateTo) return false;
+        return true;
+      });
+
+      // Hide everything, then show current page's window of matching rows
+      allRows.forEach(r => r.style.display = 'none');
+      const start = tournPage * TOURN_PAGE_SIZE;
+      const end = start + TOURN_PAGE_SIZE;
+      matching.slice(start, end).forEach(r => r.style.display = '');
+
+      document.getElementById('no-match-msg').style.display =
+        matching.length === 0 ? '' : 'none';
+
+      const pag = document.getElementById('tournaments-pagination');
+      const totalPages = Math.ceil(matching.length / TOURN_PAGE_SIZE);
+      if (totalPages <= 1) { pag.innerHTML = ''; return; }
+      let html = '';
+      if (tournPage > 0) html += '<a href="#" onclick="goTournPage(' + (tournPage - 1) + '); return false;">&laquo; Prev</a> ';
+      html += 'Page ' + (tournPage + 1) + ' of ' + totalPages;
+      if (tournPage < totalPages - 1) html += ' <a href="#" onclick="goTournPage(' + (tournPage + 1) + '); return false;">Next &raquo;</a>';
+      pag.innerHTML = html;
+    }
+
+    function goTournPage(p) { tournPage = p; renderTournaments(); }
+    function applyFilters() { tournPage = 0; renderTournaments(); }
+
+    renderTournaments();
+  </script>
 {% endblock %}

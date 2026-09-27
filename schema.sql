@@ -18,7 +18,7 @@ CREATE TABLE players (
 CREATE TABLE player_aliases (alias_name TEXT PRIMARY KEY, player_id INTEGER NOT NULL REFERENCES players(id));
 CREATE TABLE archetypes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
-    primary_colors TEXT, variant_of TEXT, style TEXT,
+    primary_colors TEXT, search_keywords TEXT, style TEXT,
     unclaimable INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE archetype_search_aliases (
@@ -41,4 +41,10 @@ CREATE INDEX idx_matches_tournament ON matches(tournament_id);
 CREATE INDEX idx_deck_cards_card ON deck_cards(card_id);
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS card_price_cache (card_name TEXT NOT NULL, price_date TEXT NOT NULL, price REAL NOT NULL, PRIMARY KEY (card_name, price_date));
+CREATE TABLE IF NOT EXISTS deck_price_snapshots (
+    moxfield_deck_id TEXT PRIMARY KEY,
+    tournament_id    TEXT NOT NULL,
+    played_on        TEXT NOT NULL,
+    total_price      REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_card_price_cache_date ON card_price_cache(price_date);
