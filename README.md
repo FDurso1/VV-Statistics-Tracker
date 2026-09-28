@@ -37,6 +37,7 @@ Data collection began Jan 4, 2026. All data collection and entry was done manual
   * All archetypes pioneered (first to play, didn’t exist prior to 2026 data)
   * Archetype Diversity trophy for number of distinct archetypes played
   * Archetype Loyalty trophies for number of instances playing with the same archetype
+* Of note: **Your ranking is not an end-all determination of your skill as a player.** Frequent brewers tend to have lower winrates on average, and people just enjoy playing non-meta decks which by their nature tend to fare worse. The rankings are for curiosity purposes only (and maybe a bit of competition), but should not be treated as anything besides one number, which is also impacted by cutoffs in the Bayesian calculations.
 
 ## Card Information:
 * See all played cards in the VV format
